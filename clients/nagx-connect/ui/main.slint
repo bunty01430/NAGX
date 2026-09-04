@@ -20,7 +20,7 @@ export component TerminalWindow inherits Rectangle {
     in property <TerminalData> data;
     in property <int> index;
 
-    callback focus(int);
+    callback focus-request(int);
     callback close(int);
     callback maximize(int);
     callback split(int);
@@ -42,7 +42,7 @@ export component TerminalWindow inherits Rectangle {
         TouchArea {
             width: parent.width - 112px;
             height: parent.height;
-            clicked => { root.focus(root.index); }
+            clicked => { root.focus-request(root.index); }
         }
 
         HorizontalBox {
@@ -89,7 +89,7 @@ export component TerminalWindow inherits Rectangle {
             TouchArea {
                 width: parent.width;
                 height: parent.height;
-                clicked => { root.focus(root.index); }
+                clicked => { root.focus-request(root.index); }
                 pointer-event(event) => {
                     let button = event.button == PointerEventButton.left ? 1 : event.button == PointerEventButton.middle ? 2 : event.button == PointerEventButton.right ? 3 : 0;
                     let kind = event.kind == PointerEventKind.down ? 1 : event.kind == PointerEventKind.up ? 2 : event.kind == PointerEventKind.move ? 3 : 0;
@@ -252,7 +252,7 @@ export component MainWindow inherits Window {
                     y: floor(index / root.terminal-columns(root.terminals.length)) * (parent.height / root.terminal-rows(root.terminals.length));
                     width: parent.width / root.terminal-columns(root.terminals.length);
                     height: parent.height / root.terminal-rows(root.terminals.length);
-                    focus(index) => { root.focus-terminal(index); }
+                    focus-request(index) => { root.focus-terminal(index); }
                     close(index) => { root.close-terminal(index); }
                     maximize(index) => { root.maximize-terminal(index); }
                     split(index) => { root.split-terminal(index); }
