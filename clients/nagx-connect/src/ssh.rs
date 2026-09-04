@@ -5,6 +5,7 @@ use russh::client::{self, Handler};
 use russh::keys::PublicKeyOrCertificate;
 use russh::{ChannelMsg, Disconnect};
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::time::timeout;
 
 pub struct NagxHandler;
 
@@ -121,47 +122,47 @@ pub async fn connect_pty(
 
     tokio::spawn(async move {
         loop {
-            tokio::select! {
-                command = command_rx.recv() => {
-                    match command {
-                        Some(PtyCommand::Input(data)) => {
-                            if channel.data_bytes(data).await.is_err() {
-                                break;
-                            }
-                        }
-                        Some(PtyCommand::Resize { cols, rows, pixel_width, pixel_height }) => {
-                            if channel
-                                .window_change(
-                                    u32::from(cols),
-                                    u32::from(rows),
-                                    u32::from(pixel_width),
-                                    u32::from(pixel_height),
-                                )
-                                .await
-                                .is_err()
-                            {
-                                break;
-                            }
-                        }
-                        None => break,
+            match timeout(Duration::from_millis(20), channel.wait()).await {
+                Ok(Some(ChannelMsg::Data { data })) => {
+                    if output_tx.send(data.to_vec()).await.is_err() {
+                        break;
                     }
                 }
-                message = channel.wait() => {
-                    match message {
-                        Some(ChannelMsg::Data { data }) => {
-                            if output_tx.send(data.to_vec()).await.is_err() {
-                                break;
-                            }
-                        }
-                        Some(ChannelMsg::ExtendedData { data, .. }) => {
-                            if output_tx.send(data.to_vec()).await.is_err() {
-                                break;
-                            }
-                        }
-                        Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => break,
-                        _ => {}
+                Ok(Some(ChannelMsg::ExtendedData { data, .. })) => {
+                    if output_tx.send(data.to_vec()).await.is_err() {
+                        break;
                     }
                 }
+                Ok(Some(ChannelMsg::Eof)) | Ok(Some(ChannelMsg::Close)) | Ok(None) => break,
+                Ok(Some(_)) | Err(_) => {}
+            }
+
+            while let Ok(command) = command_rx.try_recv() {
+                let result = match command {
+                    PtyCommand::Input(data) => channel.data_bytes(data).await,
+                    PtyCommand::Resize {
+                        cols,
+                        rows,
+                        pixel_width,
+                        pixel_height,
+                    } => channel
+                        .window_change(
+                            u32::from(cols),
+                            u32::from(rows),
+                            u32::from(pixel_width),
+                            u32::from(pixel_height),
+                        )
+                        .await,
+                };
+
+                if result.is_err() {
+                    let _ = output_tx.send(b"\r\n[NAGX] PTY transport error\r\n".to_vec()).await;
+                    break;
+                }
+            }
+
+            if command_rx.is_closed() {
+                break;
             }
         }
 
