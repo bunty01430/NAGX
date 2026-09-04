@@ -4,8 +4,6 @@ export component MainWindow inherits Window {
     title: "NAGX Connect";
     width: 1440px;
     height: 900px;
-    min-width: 1000px;
-    min-height: 650px;
     background: #06090d;
     default-font-family: "Cascadia Mono";
     default-font-size: 13px;
@@ -39,6 +37,7 @@ export component MainWindow inherits Window {
     property <int> terminal-3-cursor-y: 0;
     property <bool> terminal-3-cursor-visible: false;
     property <bool> terminal-3-mouse-reporting: false;
+
     property <int> terminal-x: 292;
     property <int> terminal-y: 220;
     property <int> terminal-width: 860;
@@ -46,6 +45,7 @@ export component MainWindow inherits Window {
     property <bool> terminal-minimized: false;
     property <bool> terminal-maximized: false;
     property <bool> terminal-focused: true;
+
     property <int> logs-x: 560;
     property <int> logs-y: 170;
     property <int> logs-width: 620;
@@ -72,10 +72,10 @@ export component MainWindow inherits Window {
     callback terminal-wheel(int, int);
     callback terminal-paste(int);
 
-    function focus-terminal() { terminal-input.focus(); }
-    function focus-terminal-window() { root.terminal-focused = true; root.logs-focused = false; root.terminal-minimized = false; root.select-terminal(root.active-terminal); terminal-input.focus(); }
+    function focus-terminal() { }
+    function focus-terminal-window() { root.terminal-focused = true; root.logs-focused = false; root.terminal-minimized = false; root.select-terminal(root.active-terminal); }
     function focus-logs-window() { root.logs-focused = true; root.terminal-focused = false; }
-    function select-terminal-ui(slot: int) { root.active-terminal = root.clamp-slot(slot); root.terminal-minimized = false; root.terminal-focused = true; root.logs-focused = false; root.select-terminal(root.active-terminal); terminal-input.focus(); }
+    function select-terminal-ui(slot: int) { root.active-terminal = root.clamp-slot(slot); root.terminal-minimized = false; root.terminal-focused = true; root.logs-focused = false; root.select-terminal(root.active-terminal); }
     function clamp-slot(slot: int) -> int { return min(max(slot, 1), 3); }
 
     VerticalBox {
@@ -90,6 +90,7 @@ export component MainWindow inherits Window {
                 Text { text: root.status-text; color: #64ffda; font-size: 11px; }
             }
         }
+
         Rectangle { height: 38px; background: #0a0f15;
             HorizontalBox { padding-left: 12px; spacing: 6px;
                 Button { text: "Overview"; clicked => { root.active-workspace = 0; } }
@@ -100,24 +101,25 @@ export component MainWindow inherits Window {
                 Text { text: "Alt+1..4 workspaces | Alt+Tab terminals"; color: #5b6978; font-size: 10px; vertical-alignment: center; }
             }
         }
+
         Rectangle { vertical-stretch: 1; background: #06090d;
             Rectangle { x: 12px; y: 12px; width: 250px; height: parent.height - 24px; background: #090d13;
                 VerticalBox { padding: 14px; spacing: 8px;
                     Text { text: "CONNECTION"; color: #718096; font-size: 10px; }
                     host-input := LineEdit { placeholder-text: "host or IP"; }
                     user-input := LineEdit { placeholder-text: "username"; }
+                    password-input := LineEdit { placeholder-text: "SSH password"; input-type: password; visible: root.auth-mode == 0; }
                     HorizontalBox { spacing: 4px;
                         Button { text: "PASSWORD"; clicked => { root.auth-mode = 0; } }
                         Button { text: "PEM / PPK"; clicked => { root.auth-mode = 1; } }
                     }
-                    if root.auth-mode == 0 : password-input := LineEdit { placeholder-text: "SSH password"; input-type: password; }
                     if root.auth-mode == 1 : Rectangle { height: 74px;
                         VerticalBox { spacing: 5px;
                             HorizontalBox { spacing: 4px;
-                                key-input := LineEdit { text: root.key-path; placeholder-text: "private key"; read-only: true; horizontal-stretch: 1; }
+                                LineEdit { text: root.key-path; placeholder-text: "private key"; read-only: true; horizontal-stretch: 1; }
                                 Button { text: "BROWSE"; clicked => { root.browse-key(); } }
                             }
-                            key-passphrase-input := LineEdit { text: root.key-passphrase; placeholder-text: "key passphrase"; input-type: password; edited(text) => { root.key-passphrase = text; } }
+                            LineEdit { placeholder-text: "key passphrase"; input-type: password; edited(text) => { root.key-passphrase = text; } }
                         }
                     }
                     Button { text: "CONNECT T" + root.active-terminal; clicked => { root.connect-slot(root.active-terminal, host-input.text, user-input.text, root.auth-mode == 0 ? password-input.text : "NAGXKEY:" + root.key-path + "\n" + root.key-passphrase); } }
@@ -144,7 +146,7 @@ export component MainWindow inherits Window {
                 width: root.terminal-maximized ? parent.width - 296px : root.terminal-width * 1px;
                 height: root.terminal-maximized ? parent.height - 188px : root.terminal-height * 1px;
                 z: 20; background: #020407; border-width: 1px; border-color: root.terminal-focused ? #31546a : #18212c;
-                drag-area := TouchArea { x: 0px; y: 0px; width: parent.width - 90px; height: 28px; mouse-cursor: move;
+                TouchArea { x: 0px; y: 0px; width: parent.width - 90px; height: 28px; mouse-cursor: move;
                     pointer-event(event) => {
                         if event.kind == PointerEventKind.down { root.focus-terminal-window(); root.dragging-terminal = true; root.drag-start-x = self.mouse-x / 1px; root.drag-start-y = self.mouse-y / 1px; root.drag-origin-x = root.terminal-x; root.drag-origin-y = root.terminal-y; }
                         else if event.kind == PointerEventKind.move && root.dragging-terminal && !root.terminal-maximized { root.terminal-x = min(max(root.drag-origin-x + self.mouse-x / 1px - root.drag-start-x, 284), max(284, 1400 - root.terminal-width)); root.terminal-y = min(max(root.drag-origin-y + self.mouse-y / 1px - root.drag-start-y, 0), max(0, 760 - root.terminal-height)); }
@@ -207,6 +209,7 @@ export component MainWindow inherits Window {
                 }
             }
         }
+
         Rectangle { height: 38px; background: #0a0f15;
             HorizontalBox { padding-left: 10px; spacing: 8px;
                 Button { text: "T1"; clicked => { root.select-terminal-ui(1); } }
