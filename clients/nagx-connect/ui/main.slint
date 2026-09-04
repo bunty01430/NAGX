@@ -2,8 +2,10 @@ import { VerticalBox, HorizontalBox, Button, LineEdit, TextEdit } from "std-widg
 
 export component MainWindow inherits Window {
     title: "NAGX Connect";
-    width: 1440px;
-    height: 900px;
+    preferred-width: 1440px;
+    preferred-height: 900px;
+    min-width: 1080px;
+    min-height: 680px;
     background: #06090d;
     default-font-family: "Cascadia Mono";
     default-font-size: 13px;
@@ -60,12 +62,43 @@ export component MainWindow inherits Window {
     callback terminal-paste(int);
     callback focus-terminal();
 
+    // Dedicated focus/clipboard TextEdit lives in the window scope so the root
+    // window can forward focus to it. The visible terminal renderer remains
+    // ANSI/styled; this control is intentionally tiny and non-visual.
+    terminal-input := TextEdit {
+        x: 0px;
+        y: 0px;
+        width: 1px;
+        height: 1px;
+        opacity: 0%;
+        text: root.active-terminal == 1 ? root.terminal-1-plain : root.active-terminal == 2 ? root.terminal-2-plain : root.terminal-3-plain;
+        read-only: true;
+        wrap: no-wrap;
+        key-pressed(event) => {
+            if event.modifiers.alt {
+                if event.text == "1" { root.select-terminal-ui(1); return accept; }
+                if event.text == "2" { root.select-terminal-ui(2); return accept; }
+                if event.text == "3" { root.select-terminal-ui(3); return accept; }
+                if event.text == "Tab" { root.select-terminal-ui(root.active-terminal == 3 ? 1 : root.active-terminal + 1); return accept; }
+            }
+            if event.modifiers.control && event.modifiers.shift {
+                if event.text == "v" || event.text == "V" { root.terminal-paste(root.active-terminal); return accept; }
+                if event.text == "a" || event.text == "A" { terminal-input.select-all(); return accept; }
+                if event.text == "c" || event.text == "C" { terminal-input.copy(); return accept; }
+            }
+            root.terminal-key(root.active-terminal, event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift);
+            return accept;
+        }
+    }
+    forward-focus: terminal-input;
+
     public function select-terminal-ui(slot: int) {
         root.active-terminal = root.clamp-slot(slot);
         root.terminal-minimized = false;
         root.terminal-focused = true;
         root.logs-focused = false;
         root.select-terminal(root.active-terminal);
+        terminal-input.focus();
         root.focus-terminal();
     }
     public pure function clamp-slot(slot: int) -> int { return min(max(slot, 1), 3); }
@@ -73,17 +106,20 @@ export component MainWindow inherits Window {
     VerticalBox {
         spacing: 0px;
         Rectangle { height: 48px; background: #0d1219;
-            HorizontalBox { padding-left: 16px; padding-right: 14px; alignment: center; spacing: 14px;
+            HorizontalBox { padding-left: 16px; padding-right: 10px; alignment: center; spacing: 12px;
                 Text { text: "NAGX"; color: #64ffda; font-size: 22px; font-weight: 700; }
                 Text { text: "CONNECT"; color: #718096; font-size: 11px; }
                 Rectangle { horizontal-stretch: 1; }
-                Text { text: root.server-text; color: #8c98a6; font-size: 11px; }
+                Text { text: root.server-text; color: #8c98a6; font-size: 11px; horizontal-alignment: right; }
                 Text { text: "|"; color: #263342; }
                 Text { text: root.status-text; color: #64ffda; font-size: 11px; }
+                Button { text: "—"; clicked => { root.minimized = true; } }
+                Button { text: root.maximized ? "❐" : "□"; clicked => { root.maximized = !root.maximized; } }
+                Button { text: root.full-screen ? "WINDOW" : "FULL"; clicked => { root.full-screen = !root.full-screen; } }
             }
         }
         Rectangle { height: 38px; background: #0a0f15;
-            HorizontalBox { padding-left: 12px; spacing: 6px;
+            HorizontalBox { padding-left: 12px; padding-right: 10px; spacing: 6px;
                 Button { text: "Overview"; clicked => { root.active-workspace = 0; } }
                 Button { text: "Development"; clicked => { root.active-workspace = 1; } }
                 Button { text: "Monitoring"; clicked => { root.active-workspace = 2; } }
@@ -130,8 +166,8 @@ export component MainWindow inherits Window {
             if !root.terminal-minimized : Rectangle {
                 x: root.terminal-maximized ? 284px : root.terminal-x * 1px;
                 y: root.terminal-maximized ? 150px : root.terminal-y * 1px;
-                width: root.terminal-maximized ? parent.width - 296px : root.terminal-width * 1px;
-                height: root.terminal-maximized ? parent.height - 188px : root.terminal-height * 1px;
+                width: root.terminal-maximized ? parent.width - 296px : min(root.terminal-width * 1px, parent.width - root.terminal-x * 1px - 20px);
+                height: root.terminal-maximized ? parent.height - 188px : min(root.terminal-height * 1px, parent.height - root.terminal-y * 1px - 12px);
                 z: 20; background: #020407; border-width: 1px; border-color: root.terminal-focused ? #31546a : #18212c;
                 Rectangle { width: parent.width; height: 28px; background: root.terminal-focused ? #0f1820 : #0b1118;
                     Text { x: 10px; text: "NAGX TERMINAL " + root.active-terminal; color: #d7dee8; font-size: 12px; vertical-alignment: center; }
@@ -140,32 +176,16 @@ export component MainWindow inherits Window {
                         Button { text: root.terminal-maximized ? "❐" : "□"; clicked => { root.terminal-maximized = !root.terminal-maximized; } }
                         Button { text: "×"; clicked => { root.terminal-minimized = true; } }
                     }
+                    TouchArea { x: 0px; y: 0px; width: parent.width - 84px; height: 28px; clicked => { root.terminal-focused = true; terminal-input.focus(); } }
                 }
                 Rectangle { x: 0px; y: 28px; width: parent.width; height: parent.height - 28px; background: #020407; clip: true;
                     Rectangle { x: 10px; y: 8px; width: parent.width - 20px; height: parent.height - 16px; clip: true;
                         StyledText { width: parent.width; height: parent.height; text: root.active-terminal == 1 ? root.terminal-1-styled : root.active-terminal == 2 ? root.terminal-2-styled : root.terminal-3-styled; }
-                        terminal-input := TextEdit {
-                            width: parent.width;
-                            height: parent.height;
-                            text: root.active-terminal == 1 ? root.terminal-1-plain : root.active-terminal == 2 ? root.terminal-2-plain : root.terminal-3-plain;
-                            read-only: true;
-                            wrap: no-wrap;
-                            opacity: 0%;
-                            key-pressed(event) => {
-                                if event.modifiers.alt {
-                                    if event.text == "1" { root.select-terminal-ui(1); return accept; }
-                                    if event.text == "2" { root.select-terminal-ui(2); return accept; }
-                                    if event.text == "3" { root.select-terminal-ui(3); return accept; }
-                                    if event.text == "Tab" { root.select-terminal-ui(root.active-terminal == 3 ? 1 : root.active-terminal + 1); return accept; }
-                                }
-                                if event.modifiers.control && event.modifiers.shift {
-                                    if event.text == "v" || event.text == "V" { root.terminal-paste(root.active-terminal); return accept; }
-                                    if event.text == "a" || event.text == "A" { terminal-input.select-all(); return accept; }
-                                    if event.text == "c" || event.text == "C" { terminal-input.copy(); return accept; }
-                                }
-                                root.terminal-key(root.active-terminal, event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift);
-                                return accept;
-                            }
+                        TouchArea {
+                            visible: !(root.active-terminal == 1 ? root.terminal-1-mouse-reporting : root.active-terminal == 2 ? root.terminal-2-mouse-reporting : root.terminal-3-mouse-reporting);
+                            enabled: self.visible;
+                            mouse-cursor: text;
+                            clicked => { root.terminal-focused = true; terminal-input.focus(); }
                         }
                         TouchArea {
                             visible: root.active-terminal == 1 ? root.terminal-1-mouse-reporting : root.active-terminal == 2 ? root.terminal-2-mouse-reporting : root.terminal-3-mouse-reporting;
@@ -173,6 +193,7 @@ export component MainWindow inherits Window {
                             pointer-event(event) => {
                                 let button = event.button == PointerEventButton.left ? 1 : event.button == PointerEventButton.middle ? 2 : event.button == PointerEventButton.right ? 3 : 0;
                                 let kind = event.kind == PointerEventKind.down ? 1 : event.kind == PointerEventKind.up ? 2 : event.kind == PointerEventKind.move ? 3 : 0;
+                                root.terminal-focused = true;
                                 root.terminal-mouse(root.active-terminal, button, kind, self.mouse-x / 1px + 1, self.mouse-y / 1px + 1, event.modifiers.shift, event.modifiers.alt, event.modifiers.control);
                             }
                             scroll-event(event) => { root.terminal-wheel(root.active-terminal, event.delta-y / 1px); accept }
@@ -180,17 +201,14 @@ export component MainWindow inherits Window {
                         Rectangle { visible: root.active-terminal == 1 ? root.terminal-1-cursor-visible : (root.active-terminal == 2 ? root.terminal-2-cursor-visible : root.terminal-3-cursor-visible); x: (root.active-terminal == 1 ? root.terminal-1-cursor-x : (root.active-terminal == 2 ? root.terminal-2-cursor-x : root.terminal-3-cursor-x)) * 8.45px; y: (root.active-terminal == 1 ? root.terminal-1-cursor-y : (root.active-terminal == 2 ? root.terminal-2-cursor-y : root.terminal-3-cursor-y)) * 17px; width: 2px; height: 16px; background: #64ffda; }
                     }
                 }
-                TouchArea { x: parent.width - 18px; y: parent.height - 18px; width: 18px; height: 18px; mouse-cursor: se-resize;
-                    pointer-event(event) => { if event.kind == PointerEventKind.down { root.terminal-focused = true; root.terminal-minimized = false; } }
-                }
             }
-            if root.terminal-minimized : Rectangle { x: root.terminal-x * 1px; y: root.terminal-y * 1px; width: 310px; height: 28px; z: 20; background: #0b1118; border-width: 1px; border-color: #18212c;
-                HorizontalBox { Text { text: "NAGX T" + root.active-terminal + " minimized"; color: #718096; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Button { text: "Restore"; clicked => { root.terminal-minimized = false; root.terminal-focused = true; root.focus-terminal(); } } }
+            if root.terminal-minimized : Rectangle { x: min(root.terminal-x * 1px, parent.width - 330px); y: min(root.terminal-y * 1px, parent.height - 46px); width: 310px; height: 28px; z: 20; background: #0b1118; border-width: 1px; border-color: #18212c;
+                HorizontalBox { Text { text: "NAGX T" + root.active-terminal + " minimized"; color: #718096; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Button { text: "Restore"; clicked => { root.terminal-minimized = false; root.terminal-focused = true; terminal-input.focus(); root.focus-terminal(); } } }
             }
-            if root.logs-open : Rectangle { x: root.logs-x * 1px; y: root.logs-y * 1px; width: root.logs-width * 1px; height: root.logs-height * 1px; z: 10; background: #05080c; border-width: 1px; border-color: root.logs-focused ? #31546a : #18212c;
+            if root.logs-open : Rectangle { x: min(root.logs-x * 1px, parent.width - root.logs-width * 1px - 20px); y: min(root.logs-y * 1px, parent.height - root.logs-height * 1px - 12px); width: min(root.logs-width * 1px, parent.width - 40px); height: min(root.logs-height * 1px, parent.height - 40px); z: 10; background: #05080c; border-width: 1px; border-color: root.logs-focused ? #31546a : #18212c;
                 Rectangle { width: parent.width; height: 28px; background: root.logs-focused ? #0f1820 : #0b1118;
                     Text { x: 10px; text: "NAGX LOGS · T" + root.active-terminal; color: #d7dee8; font-size: 12px; vertical-alignment: center; }
-                    Button { x: parent.width - 36px; width: 36px; height: 28px; text: "×"; clicked => { root.logs-open = false; root.logs-focused = false; root.terminal-focused = true; root.focus-terminal(); } }
+                    Button { x: parent.width - 36px; width: 36px; height: 28px; text: "×"; clicked => { root.logs-open = false; root.logs-focused = false; root.terminal-focused = true; terminal-input.focus(); root.focus-terminal(); } }
                 }
                 TextEdit {
                     x: 14px; y: 42px; width: parent.width - 28px; height: parent.height - 56px;
