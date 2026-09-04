@@ -6,10 +6,11 @@ slint::include_modules!();
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use arboard::Clipboard;
 use rfd::FileDialog;
-use slint::{Model, ModelRc, VecModel};
+use slint::{Model, ModelRc, Timer, TimerMode, VecModel};
 use ssh::PtySession;
 use terminal_emulator::TerminalEmulator;
 
@@ -22,9 +23,20 @@ struct ConnectionProfile {
     passphrase: String,
 }
 
+#[derive(Clone)]
+struct TerminalUiSnapshot {
+    markup: String,
+    plain: String,
+    cursor_x: u16,
+    cursor_y: u16,
+    cursor_visible: bool,
+    mouse_reporting: bool,
+}
+
 type PtyPool = Arc<Mutex<Vec<Option<PtySession>>>>;
 type EmulatorPool = Arc<Mutex<Vec<TerminalEmulator>>>;
 type ProfilePool = Arc<Mutex<Vec<Option<ConnectionProfile>>>>;
+type SnapshotPool = Arc<Mutex<Vec<Option<TerminalUiSnapshot>>>>;
 
 fn terminal_key_bytes(text: &str, control: bool, alt: bool) -> Vec<u8> {
     use slint::platform::Key;
@@ -73,27 +85,39 @@ fn update_terminal_model(model: &Rc<VecModel<TerminalData>>, index: usize, data:
     if index < model.row_count() {
         model.set_row_data(index, data);
     } else {
+        while model.row_count() < index {
+            let filler = model.row_count();
+            model.push(build_terminal_data(filler, format!("terminal-{:02}", filler + 1), "DISCONNECTED", "", "", false));
+        }
         model.push(data);
     }
 }
 
-fn snapshot_terminal(emulators: &EmulatorPool, index: usize) -> Option<(String, String, (u16, u16), bool, bool)> {
+fn snapshot_terminal(emulators: &EmulatorPool, index: usize) -> Option<TerminalUiSnapshot> {
     let emulators = emulators.lock().ok()?;
     let terminal = emulators.get(index)?;
-    Some((terminal.render_markup(), terminal.render(), terminal.cursor_position(), terminal.cursor_visible(), terminal.mouse_reporting_enabled()))
+    let (cursor_y, cursor_x) = terminal.cursor_position();
+    Some(TerminalUiSnapshot {
+        markup: terminal.render_markup(),
+        plain: terminal.render(),
+        cursor_x,
+        cursor_y,
+        cursor_visible: terminal.cursor_visible(),
+        mouse_reporting: terminal.mouse_reporting_enabled(),
+    })
 }
 
-fn apply_terminal_snapshot(window: &MainWindow, emulators: &EmulatorPool, model: &Rc<VecModel<TerminalData>>, index: usize) {
-    let Some((markup, plain, (cursor_y, cursor_x), cursor_visible, mouse_reporting)) = snapshot_terminal(emulators, index) else { return; };
-    let data = model.row_data(index).unwrap_or_else(|| build_terminal_data(index, format!("terminal-{:02}", index + 1), "OFFLINE", "", "", false));
+fn apply_snapshot_to_model(model: &Rc<VecModel<TerminalData>>, snapshots: &SnapshotPool, index: usize) {
+    let snapshot = snapshots.lock().ok().and_then(|mut pool| pool.get_mut(index).and_then(Option::take));
+    let Some(snapshot) = snapshot else { return; };
+    let data = model.row_data(index).unwrap_or_else(|| build_terminal_data(index, format!("terminal-{:02}", index + 1), "CONNECTED", "", "", false));
     let mut updated = data;
-    updated.content = slint::StyledText::from_markdown(&markup).unwrap_or_else(|_| slint::StyledText::from_plain_text(&markup));
-    updated.plain = plain.into();
-    updated.cursor_x = i32::from(cursor_x);
-    updated.cursor_y = i32::from(cursor_y);
-    updated.cursor_visible = cursor_visible;
-    updated.mouse_reporting = mouse_reporting;
-    updated.focused = index as i32 == window.get_active_terminal_index();
+    updated.content = slint::StyledText::from_markdown(&snapshot.markup).unwrap_or_else(|_| slint::StyledText::from_plain_text(&snapshot.markup));
+    updated.plain = snapshot.plain.into();
+    updated.cursor_x = i32::from(snapshot.cursor_x);
+    updated.cursor_y = i32::from(snapshot.cursor_y);
+    updated.cursor_visible = snapshot.cursor_visible;
+    updated.mouse_reporting = snapshot.mouse_reporting;
     update_terminal_model(model, index, updated);
 }
 
@@ -123,6 +147,19 @@ fn main() -> Result<(), slint::PlatformError> {
     let ptys: PtyPool = Arc::new(Mutex::new(vec![None]));
     let emulators: EmulatorPool = Arc::new(Mutex::new(vec![TerminalEmulator::new(32, 120, 10_000)]));
     let profiles: ProfilePool = Arc::new(Mutex::new(vec![None]));
+    let snapshots: SnapshotPool = Arc::new(Mutex::new(vec![None]));
+
+    let ui_timer = Timer::default();
+    {
+        let model = Rc::clone(&model);
+        let snapshots = Arc::clone(&snapshots);
+        ui_timer.start(TimerMode::Repeated, Duration::from_millis(33), move || {
+            let indices: Vec<usize> = snapshots.lock().map(|pool| pool.iter().enumerate().filter_map(|(i, value)| value.as_ref().map(|_| i)).collect()).unwrap_or_default();
+            for index in indices {
+                apply_snapshot_to_model(&model, &snapshots, index);
+            }
+        });
+    }
 
     {
         let weak = window.as_weak();
@@ -141,6 +178,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let ptys = Arc::clone(&ptys);
         let emulators = Arc::clone(&emulators);
         let profiles = Arc::clone(&profiles);
+        let snapshots = Arc::clone(&snapshots);
         let model = Rc::clone(&model);
         window.on_connect_request(move |index, host, username, auth_mode, secret, passphrase| {
             let index = index.max(0) as usize;
@@ -175,6 +213,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 while profiles.len() <= index { profiles.push(None); }
                 profiles[index] = Some(ConnectionProfile { host: host.to_string(), username: username.to_string(), auth_mode: mode.clone(), secret: secret.clone(), passphrase: passphrase.clone() });
             }
+            {
+                let mut snapshots = snapshots.lock().expect("snapshot mutex poisoned");
+                while snapshots.len() <= index { snapshots.push(None); }
+            }
 
             {
                 let mut data = model.row_data(index).unwrap_or_else(|| build_terminal_data(index, format!("terminal-{:02}", index + 1), "DISCONNECTED", "", "", false));
@@ -191,60 +233,65 @@ fn main() -> Result<(), slint::PlatformError> {
             }
 
             let weak_for_thread = weak.clone();
+            let ptys_thread = Arc::clone(&ptys);
+            let emulators_thread = Arc::clone(&emulators);
+            let snapshots_thread = Arc::clone(&snapshots);
             thread::spawn(move || {
                 let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
                     Ok(runtime) => runtime,
                     Err(err) => {
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(window) = weak_for_thread.upgrade() { window.set_status_text(format!("TERMINAL {:02} · RUNTIME ERROR: {err}", index + 1).into()); }
-                        });
+                        let _ = weak_for_thread.upgrade_in_event_loop(move |window| window.set_status_text(format!("TERMINAL {:02} · RUNTIME ERROR: {err}", index + 1).into()));
                         return;
                     }
                 };
-
                 match runtime.block_on(ssh::connect_pty(host.to_string(), 22, username.to_string(), mode.clone(), secret.clone(), passphrase.clone())) {
                     Ok((pty, mut output_rx)) => {
-                        if let Ok(mut slots) = ptys.lock() { if index >= slots.len() { slots.resize_with(index + 1, || None); } slots[index] = Some(pty); }
-                        if let Ok(mut slots) = emulators.lock() { if index >= slots.len() { slots.resize_with(index + 1, || TerminalEmulator::new(32, 120, 10_000)); } slots[index] = TerminalEmulator::new(32, 120, 10_000); }
-                        let weak_ui = weak_for_thread.clone();
+                        if let Ok(mut slots) = ptys_thread.lock() {
+                            if index >= slots.len() { slots.resize_with(index + 1, || None); }
+                            slots[index] = Some(pty);
+                        }
+                        if let Ok(mut slots) = emulators_thread.lock() {
+                            if index >= slots.len() { slots.resize_with(index + 1, || TerminalEmulator::new(32, 120, 10_000)); }
+                            slots[index] = TerminalEmulator::new(32, 120, 10_000);
+                        }
                         let host_ui = host.to_string();
                         let username_ui = username.to_string();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(window) = weak_ui.upgrade() {
-                                window.set_active_terminal_index(index as i32);
-                                window.set_server_text(format!("{}@{}:22", username_ui, host_ui).into());
-                                window.set_status_text(format!("TERMINAL {:02} · CONNECTED / ANSI PTY", index + 1).into());
-                                window.invoke_focus_input();
-                            }
+                        let _ = weak_for_thread.upgrade_in_event_loop(move |window| {
+                            window.set_server_text(format!("{}@{}:22", username_ui, host_ui).into());
+                            window.set_status_text(format!("TERMINAL {:02} · CONNECTED / ANSI PTY", index + 1).into());
+                            window.invoke_focus_input();
                         });
 
                         runtime.block_on(async move {
                             while let Some(bytes) = output_rx.recv().await {
-                                let snapshot = {
-                                    let mut slots = emulators.lock().expect("terminal mutex poisoned");
-                                    let terminal = &mut slots[index];
-                                    let markup = terminal.process(&bytes);
-                                    let plain = terminal.render();
-                                    let position = terminal.cursor_position();
-                                    (markup, plain, position, terminal.cursor_visible(), terminal.mouse_reporting_enabled())
+                                let Some(snapshot) = snapshot_terminal(&emulators_thread, index) else { continue; };
+                                let mut emulator = emulators_thread.lock().expect("terminal mutex poisoned");
+                                let terminal = &mut emulator[index];
+                                let markup = terminal.process(&bytes);
+                                let plain = terminal.render();
+                                let (cursor_y, cursor_x) = terminal.cursor_position();
+                                let snapshot = TerminalUiSnapshot {
+                                    markup,
+                                    plain,
+                                    cursor_x,
+                                    cursor_y,
+                                    cursor_visible: terminal.cursor_visible(),
+                                    mouse_reporting: terminal.mouse_reporting_enabled(),
                                 };
-                                let _weak_output = weak_for_thread.clone();
-                                let _ = snapshot;
-                            }
-                            if let Ok(mut slots) = ptys.lock() { if index < slots.len() { slots[index] = None; } }
-                            let _ = slint::invoke_from_event_loop(move || {
-                                if let Some(window) = weak_for_thread.upgrade() {
-                                    if index as i32 == window.get_active_terminal_index() { window.set_status_text(format!("TERMINAL {:02} · PTY DISCONNECTED", index + 1).into()); }
+                                drop(emulator);
+                                if let Ok(mut pool) = snapshots_thread.lock() {
+                                    if index >= pool.len() { pool.resize_with(index + 1, || None); }
+                                    pool[index] = Some(snapshot);
                                 }
+                            }
+                            if let Ok(mut slots) = ptys_thread.lock() { if index < slots.len() { slots[index] = None; } }
+                            let _ = weak_for_thread.upgrade_in_event_loop(move |window| {
+                                if index as i32 == window.get_active_terminal_index() { window.set_status_text(format!("TERMINAL {:02} · PTY DISCONNECTED", index + 1).into()); }
                             });
                         });
                     }
                     Err(err) => {
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(window) = weak_for_thread.upgrade() {
-                                window.set_status_text(format!("TERMINAL {:02} · {err}", index + 1).into());
-                            }
-                        });
+                        let _ = weak_for_thread.upgrade_in_event_loop(move |window| window.set_status_text(format!("TERMINAL {:02} · {err}", index + 1).into()));
                     }
                 }
             });
@@ -256,6 +303,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let ptys = Arc::clone(&ptys);
         let emulators = Arc::clone(&emulators);
         let profiles = Arc::clone(&profiles);
+        let snapshots = Arc::clone(&snapshots);
         let model = Rc::clone(&model);
         window.on_new_terminal(move || {
             let index = model.row_count();
@@ -263,6 +311,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Ok(mut ptys) = ptys.lock() { ptys.push(None); }
             if let Ok(mut emulators) = emulators.lock() { emulators.push(TerminalEmulator::new(32, 120, 10_000)); }
             if let Ok(mut profiles) = profiles.lock() { profiles.push(None); }
+            if let Ok(mut snapshots) = snapshots.lock() { snapshots.push(None); }
             if let Some(window) = weak.upgrade() {
                 window.set_active_terminal_index(index as i32);
                 window.set_connection_open(true);
@@ -369,5 +418,6 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     window.on_focus_input(move || {});
+    let _ui_timer = ui_timer;
     window.run()
 }
