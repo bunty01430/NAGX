@@ -28,11 +28,7 @@ impl TerminalEmulator {
             let mut run = String::new();
 
             for col in 0..cols {
-                let cell = match screen.cell(row, col) {
-                    Some(cell) => cell,
-                    None => continue,
-                };
-
+                let cell = match screen.cell(row, col) { Some(cell) => cell, None => continue };
                 let fg = effective_color(cell.fgcolor(), cell.bold());
                 let bold = cell.bold();
                 let italic = cell.italic();
@@ -52,9 +48,7 @@ impl TerminalEmulator {
                 escape_markup(value, &mut run);
             }
 
-            if !run.is_empty() {
-                append_span(&mut markup, current_fg, current_bold, current_italic, &run);
-            }
+            if !run.is_empty() { append_span(&mut markup, current_fg, current_bold, current_italic, &run); }
             if row + 1 < rows { markup.push('\n'); }
         }
 
@@ -64,51 +58,21 @@ impl TerminalEmulator {
     pub fn cursor_position(&self) -> (u16, u16) { self.parser.screen().cursor_position() }
     pub fn cursor_visible(&self) -> bool { !self.parser.screen().hide_cursor() }
     pub fn size(&self) -> (u16, u16) { self.parser.screen().size() }
-
-    pub fn set_size(&mut self, rows: u16, cols: u16) {
-        let rows = rows.max(1);
-        let cols = cols.max(1);
-        self.parser.screen_mut().set_size(rows, cols);
-    }
-
+    pub fn set_size(&mut self, rows: u16, cols: u16) { self.parser.screen_mut().set_size(rows.max(1), cols.max(1)); }
     pub fn set_scrollback(&mut self, rows: usize) { self.parser.screen_mut().set_scrollback(rows); }
+    pub fn mouse_reporting_enabled(&self) -> bool { self.parser.screen().mouse_protocol_mode() != MouseProtocolMode::None }
+    pub fn bracketed_paste_enabled(&self) -> bool { self.parser.screen().bracketed_paste() }
 
-    pub fn mouse_reporting_enabled(&self) -> bool {
-        self.parser.screen().mouse_protocol_mode() != MouseProtocolMode::None
-    }
-
-    pub fn bracketed_paste_enabled(&self) -> bool {
-        self.parser.screen().bracketed_paste()
-    }
-
-    pub fn mouse_report(
-        &self,
-        button: u8,
-        kind: u8,
-        x: u16,
-        y: u16,
-        shift: bool,
-        alt: bool,
-        control: bool,
-    ) -> Option<Vec<u8>> {
+    pub fn mouse_report(&self, button: u8, kind: u8, x: u16, y: u16, shift: bool, alt: bool, control: bool) -> Option<Vec<u8>> {
         if !self.mouse_reporting_enabled() { return None; }
 
-        let mut code = match button {
-            1 => 0,
-            2 => 1,
-            3 => 2,
-            4 => 64,
-            5 => 65,
-            _ => return None,
-        };
-
+        let mut code = match button { 1 => 0u16, 2 => 1u16, 3 => 2u16, 4 => 64u16, 5 => 65u16, _ => return None };
         if kind == 3 { code += 32; }
         if shift { code += 4; }
         if alt { code += 8; }
         if control { code += 16; }
 
-        let encoding = self.parser.screen().mouse_protocol_encoding();
-        match encoding {
+        match self.parser.screen().mouse_protocol_encoding() {
             MouseProtocolEncoding::Utf8 => {
                 let mut data = Vec::new();
                 data.extend_from_slice(b"\x1b[M");
@@ -120,17 +84,6 @@ impl TerminalEmulator {
             MouseProtocolEncoding::Sgr => {
                 let suffix = if kind == 2 { 'm' } else { 'M' };
                 Some(format!("\x1b[<{};{};{}{}", code, x, y, suffix).into_bytes())
-            }
-            MouseProtocolEncoding::Urxvt => {
-                Some(format!("\x1b[{};{};{}M", code + 32, x + 32, y + 32).into_bytes())
-            }
-            MouseProtocolEncoding::X10 => {
-                let mut data = Vec::new();
-                data.extend_from_slice(b"\x1b[M");
-                data.push((code + 32).min(255));
-                data.push((x + 32).min(255));
-                data.push((y + 32).min(255));
-                Some(data)
             }
         }
     }
@@ -164,34 +117,24 @@ fn escape_markup(value: &str, output: &mut String) {
 fn append_span(output: &mut String, color: Option<Color>, bold: bool, italic: bool, text: &str) {
     let Some(color) = color else { output.push_str(text); return; };
     let color = color_hex(color);
-    if bold && italic {
-        output.push_str(&format!("<b><i><font color=\"{}\">{}</font></i></b>", color, text));
-    } else if bold {
-        output.push_str(&format!("<b><font color=\"{}\">{}</font></b>", color, text));
-    } else if italic {
-        output.push_str(&format!("<i><font color=\"{}\">{}</font></i>", color, text));
-    } else {
-        output.push_str(&format!("<font color=\"{}\">{}</font>", color, text));
-    }
+    if bold && italic { output.push_str(&format!("<b><i><font color=\"{}\">{}</font></i></b>", color, text)); }
+    else if bold { output.push_str(&format!("<b><font color=\"{}\">{}</font></b>", color, text)); }
+    else if italic { output.push_str(&format!("<i><font color=\"{}\">{}</font></i>", color, text)); }
+    else { output.push_str(&format!("<font color=\"{}\">{}</font>", color, text)); }
 }
 
 fn color_hex(color: Color) -> String {
     match color {
         Color::Default => "#d7dee8".into(),
-        Color::Idx(index) => {
-            let rgb = ansi_index_rgb(index);
-            format!("#{:02x}{:02x}{:02x}", rgb.0, rgb.1, rgb.2)
-        }
+        Color::Idx(index) => { let rgb = ansi_index_rgb(index); format!("#{:02x}{:02x}{:02x}", rgb.0, rgb.1, rgb.2) }
         Color::Rgb(r, g, b) => format!("#{:02x}{:02x}{:02x}", r, g, b),
     }
 }
 
 fn ansi_index_rgb(index: u8) -> (u8, u8, u8) {
-    const BASIC: [(u8, u8, u8); 16] = [
-        (0, 0, 0), (205, 49, 49), (13, 188, 121), (229, 229, 16),
-        (36, 114, 200), (188, 63, 188), (17, 168, 205), (229, 229, 229),
-        (102, 102, 102), (241, 76, 76), (35, 209, 139), (245, 245, 67),
-        (59, 142, 234), (214, 112, 214), (41, 184, 219), (255, 255, 255),
+    const BASIC: [(u8,u8,u8); 16] = [
+        (0,0,0),(205,49,49),(13,188,121),(229,229,16),(36,114,200),(188,63,188),(17,168,205),(229,229,229),
+        (102,102,102),(241,76,76),(35,209,139),(245,245,67),(59,142,234),(214,112,214),(41,184,219),(255,255,255)
     ];
     if index < 16 { return BASIC[index as usize]; }
     if (16..=231).contains(&index) {
