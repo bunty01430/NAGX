@@ -71,15 +71,68 @@ fn terminal_key_bytes(text: &str, control: bool, alt: bool) -> Vec<u8> {
     data
 }
 
-fn paste_from_clipboard(terminal: &Arc<Mutex<TerminalSlots>>, ptys: &PtySlots, slot: usize) -> Result<(), String> {
+fn terminal_snapshot(terminals: &TerminalSlots, slot: usize) -> Result<(String, String, (u16, u16), bool, bool), String> {
+    let slots = terminals.lock().map_err(|_| "terminal mutex poisoned".to_string())?;
+    let terminal = &slots[slot];
+    Ok((
+        terminal.render_markup(),
+        terminal.render(),
+        terminal.cursor_position(),
+        terminal.cursor_visible(),
+        terminal.mouse_reporting_enabled(),
+    ))
+}
+
+fn apply_active_terminal_snapshot(window: &MainWindow, terminals: &TerminalSlots, slot: usize) {
+    let Ok((markup, plain, (cursor_y, cursor_x), cursor_visible, mouse_reporting)) = terminal_snapshot(terminals, slot) else {
+        return;
+    };
+    let styled = slint::StyledText::from_markdown(&markup)
+        .unwrap_or_else(|_| slint::StyledText::from_plain_text(&markup));
+    match slot {
+        0 => {
+            window.set_terminal_1_styled(styled);
+            window.set_terminal_1_plain(plain.into());
+            window.set_terminal_1_cursor_x(i32::from(cursor_x));
+            window.set_terminal_1_cursor_y(i32::from(cursor_y));
+            window.set_terminal_1_cursor_visible(cursor_visible);
+            window.set_terminal_1_mouse_reporting(mouse_reporting);
+        }
+        1 => {
+            window.set_terminal_2_styled(styled);
+            window.set_terminal_2_plain(plain.into());
+            window.set_terminal_2_cursor_x(i32::from(cursor_x));
+            window.set_terminal_2_cursor_y(i32::from(cursor_y));
+            window.set_terminal_2_cursor_visible(cursor_visible);
+            window.set_terminal_2_mouse_reporting(mouse_reporting);
+        }
+        2 => {
+            window.set_terminal_3_styled(styled);
+            window.set_terminal_3_plain(plain.into());
+            window.set_terminal_3_cursor_x(i32::from(cursor_x));
+            window.set_terminal_3_cursor_y(i32::from(cursor_y));
+            window.set_terminal_3_cursor_visible(cursor_visible);
+            window.set_terminal_3_mouse_reporting(mouse_reporting);
+        }
+        _ => return,
+    }
+    window.set_cursor_x(i32::from(cursor_x));
+    window.set_cursor_y(i32::from(cursor_y));
+    window.set_cursor_visible(cursor_visible);
+    window.set_mouse_reporting(mouse_reporting);
+}
+
+fn paste_from_clipboard(terminal: &TerminalSlots, ptys: &PtySlots, slot: usize) -> Result<(), String> {
     let mut clipboard = Clipboard::new().map_err(|err| format!("Clipboard unavailable: {err}"))?;
     let text = clipboard.get_text().map_err(|err| format!("Clipboard read failed: {err}"))?;
     if text.is_empty() || slot >= TERMINAL_SLOTS { return Ok(()); }
 
-    let bracketed = terminal
-        .lock()
-        .map_err(|_| "Terminal mutex poisoned".to_string())?[slot]
-        .bracketed_paste_enabled();
+    let bracketed = terminal_snapshot(terminal, slot)?.4;
+    let bracketed = if bracketed {
+        true
+    } else {
+        terminal.lock().map_err(|_| "terminal mutex poisoned".to_string())?[slot].bracketed_paste_enabled()
+    };
 
     let data = if bracketed {
         let mut wrapped = Vec::with_capacity(text.len() + 12);
@@ -122,12 +175,8 @@ fn spawn_terminal_connection(
 
         match runtime.block_on(ssh::connect_pty(host.clone(), 22, username.clone(), password)) {
             Ok((pty, mut output_rx)) => {
-                if let Ok(mut slots) = ptys.lock() {
-                    slots[slot] = Some(pty.clone());
-                }
-                if let Ok(mut slots) = terminals.lock() {
-                    slots[slot] = TerminalEmulator::new(32, 120, 2000);
-                }
+                if let Ok(mut slots) = ptys.lock() { slots[slot] = Some(pty.clone()); }
+                if let Ok(mut slots) = terminals.lock() { slots[slot] = TerminalEmulator::new(32, 120, 2000); }
 
                 let _ = slint::invoke_from_event_loop({
                     let weak_window = weak_window.clone();
@@ -135,15 +184,15 @@ fn spawn_terminal_connection(
                         if let Some(window) = weak_window.upgrade() {
                             window.set_server_text(format!("T{} · {}@{}:22", slot + 1, username, host).into());
                             window.set_status_text(format!("T{} CONNECTED / ANSI PTY", slot + 1).into());
-                            if slot == window.get_active_terminal() as usize {
-                                window.set_cursor_visible(true);
-                                window.invoke_focus_terminal();
-                            }
                             match slot {
                                 0 => window.set_terminal_1_state("CONNECTED".into()),
                                 1 => window.set_terminal_2_state("CONNECTED".into()),
                                 2 => window.set_terminal_3_state("CONNECTED".into()),
                                 _ => {}
+                            }
+                            if slot == (window.get_active_terminal() as usize).saturating_sub(1) {
+                                window.set_cursor_visible(true);
+                                window.invoke_focus_terminal();
                             }
                         }
                     }
@@ -164,12 +213,11 @@ fn spawn_terminal_connection(
                             let weak_window = weak_window.clone();
                             move || {
                                 if let Some(window) = weak_window.upgrade() {
+                                    let styled = slint::StyledText::from_markdown(&markup)
+                                        .unwrap_or_else(|_| slint::StyledText::from_plain_text(&markup));
                                     match slot {
                                         0 => {
-                                            window.set_terminal_1_styled(
-                                                slint::StyledText::from_markdown(&markup)
-                                                    .unwrap_or_else(|_| slint::StyledText::from_plain_text(&markup)),
-                                            );
+                                            window.set_terminal_1_styled(styled);
                                             window.set_terminal_1_plain(plain.into());
                                             window.set_terminal_1_cursor_x(i32::from(cursor_x));
                                             window.set_terminal_1_cursor_y(i32::from(cursor_y));
@@ -177,10 +225,7 @@ fn spawn_terminal_connection(
                                             window.set_terminal_1_mouse_reporting(mouse_reporting);
                                         }
                                         1 => {
-                                            window.set_terminal_2_styled(
-                                                slint::StyledText::from_markdown(&markup)
-                                                    .unwrap_or_else(|_| slint::StyledText::from_plain_text(&markup)),
-                                            );
+                                            window.set_terminal_2_styled(styled);
                                             window.set_terminal_2_plain(plain.into());
                                             window.set_terminal_2_cursor_x(i32::from(cursor_x));
                                             window.set_terminal_2_cursor_y(i32::from(cursor_y));
@@ -188,10 +233,7 @@ fn spawn_terminal_connection(
                                             window.set_terminal_2_mouse_reporting(mouse_reporting);
                                         }
                                         2 => {
-                                            window.set_terminal_3_styled(
-                                                slint::StyledText::from_markdown(&markup)
-                                                    .unwrap_or_else(|_| slint::StyledText::from_plain_text(&markup)),
-                                            );
+                                            window.set_terminal_3_styled(styled);
                                             window.set_terminal_3_plain(plain.into());
                                             window.set_terminal_3_cursor_x(i32::from(cursor_x));
                                             window.set_terminal_3_cursor_y(i32::from(cursor_y));
@@ -200,7 +242,8 @@ fn spawn_terminal_connection(
                                         }
                                         _ => {}
                                     }
-                                    if slot == window.get_active_terminal() as usize {
+                                    if slot == (window.get_active_terminal() as usize).saturating_sub(1) {
+                                        window.set_server_text(format!("T{} · active", slot + 1).into());
                                         window.set_cursor_x(i32::from(cursor_x));
                                         window.set_cursor_y(i32::from(cursor_y));
                                         window.set_cursor_visible(cursor_visible);
@@ -211,9 +254,7 @@ fn spawn_terminal_connection(
                         });
                     }
 
-                    if let Ok(mut slots) = ptys.lock() {
-                        slots[slot] = None;
-                    }
+                    if let Ok(mut slots) = ptys.lock() { slots[slot] = None; }
 
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(window) = weak_window.upgrade() {
@@ -223,7 +264,7 @@ fn spawn_terminal_connection(
                                 2 => { window.set_terminal_3_state("OFFLINE".into()); window.set_terminal_3_cursor_visible(false); window.set_terminal_3_mouse_reporting(false); }
                                 _ => {}
                             }
-                            if slot == window.get_active_terminal() as usize {
+                            if slot == (window.get_active_terminal() as usize).saturating_sub(1) {
                                 window.set_status_text(format!("T{} PTY DISCONNECTED", slot + 1).into());
                                 window.set_cursor_visible(false);
                                 window.set_mouse_reporting(false);
@@ -265,7 +306,7 @@ fn main() -> Result<(), slint::PlatformError> {
     window.on_connect_slot(move |slot, host, username, password| {
         let slot = (slot.clamp(1, 3) - 1) as usize;
         if host.trim().is_empty() || username.trim().is_empty() {
-            weak_for_connect.upgrade().map(|window| window.set_status_text("INVALID CONNECTION".into()));
+            let _ = weak_for_connect.upgrade().map(|window| window.set_status_text("INVALID CONNECTION".into()));
             return;
         }
         spawn_terminal_connection(
@@ -284,6 +325,14 @@ fn main() -> Result<(), slint::PlatformError> {
             _ => {}
         }
         window.set_active_terminal((slot + 1) as i32);
+        apply_active_terminal_snapshot(&window, &terminals_for_connect, slot);
+        window.invoke_focus_terminal();
+    });
+
+    let terminals_for_select = Arc::clone(&terminals);
+    window.on_select_terminal(move |slot| {
+        let slot = (slot.clamp(1, 3) - 1) as usize;
+        apply_active_terminal_snapshot(&window, &terminals_for_select, slot);
     });
 
     let ptys_for_keyboard = Arc::clone(&ptys);
@@ -291,9 +340,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let slot = (slot.clamp(1, 3) - 1) as usize;
         let bytes = terminal_key_bytes(text.as_str(), control, alt);
         if bytes.is_empty() { return; }
-        if let Some(pty) = ptys_for_keyboard.lock().expect("PTY mutex poisoned")[slot].clone() {
-            let _ = pty.send(bytes);
-        }
+        if let Some(pty) = ptys_for_keyboard.lock().expect("PTY mutex poisoned")[slot].clone() { let _ = pty.send(bytes); }
     });
 
     let ptys_for_resize = Arc::clone(&ptys);
@@ -304,22 +351,18 @@ fn main() -> Result<(), slint::PlatformError> {
         let rows = rows.clamp(1, 200) as u16;
         let pixel_width = pixel_width.clamp(1, u16::MAX as i32) as u16;
         let pixel_height = pixel_height.clamp(1, u16::MAX as i32) as u16;
-
         {
             let mut terminals = terminals_for_resize.lock().expect("terminal mutex poisoned");
             if terminals[slot].size() != (rows, cols) { terminals[slot].set_size(rows, cols); }
         }
-        if let Some(pty) = ptys_for_resize.lock().expect("PTY mutex poisoned")[slot].clone() {
-            let _ = pty.resize(cols, rows, pixel_width, pixel_height);
-        }
+        if let Some(pty) = ptys_for_resize.lock().expect("PTY mutex poisoned")[slot].clone() { let _ = pty.resize(cols, rows, pixel_width, pixel_height); }
     });
 
     let ptys_for_mouse = Arc::clone(&ptys);
     let terminals_for_mouse = Arc::clone(&terminals);
     window.on_terminal_mouse(move |slot, button, kind, x, y, shift, alt, control| {
         let slot = (slot.clamp(1, 3) - 1) as usize;
-        let bytes = terminals_for_mouse
-            .lock().expect("terminal mutex poisoned")[slot]
+        let bytes = terminals_for_mouse.lock().expect("terminal mutex poisoned")[slot]
             .mouse_report(button.clamp(0, 5) as u8, kind.clamp(0, 3) as u8, x.clamp(1, 1000) as u16, y.clamp(1, 1000) as u16, shift, alt, control);
         if let Some(bytes) = bytes {
             if let Some(pty) = ptys_for_mouse.lock().expect("PTY mutex poisoned")[slot].clone() { let _ = pty.send(bytes); }
