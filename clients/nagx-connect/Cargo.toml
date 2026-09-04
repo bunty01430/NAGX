@@ -14,6 +14,7 @@ russh = "0.63.2"
 tokio = { version = "1.47", features = ["rt-multi-thread", "sync", "io-util", "time"] }
 vt100 = "0.16.2"
 arboard = "3.6.1"
+rfd = "0.17.2"
 
 [build-dependencies]
 slint-build = "1.17.1"
