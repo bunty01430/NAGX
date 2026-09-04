@@ -47,9 +47,9 @@ fn main() {
         "terminal resize handle",
     );
 
-    let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR missing"));
+    let mut out = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR missing"));
     out.push("main.generated.slint");
     fs::write(&out, ui).expect("failed to write generated Slint UI");
     slint_build::compile(out.to_str().expect("generated UI path is not UTF-8"))
-        .expect("failed to compile Slint UI");
+        .expect("failed to compile generated Slint UI");
 }
