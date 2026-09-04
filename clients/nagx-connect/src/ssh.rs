@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use russh::client::{self, Handler};
-use russh::keys::PublicKey;
+use russh::keys::PublicKeyOrCertificate;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
@@ -11,7 +11,10 @@ pub struct NagxHandler;
 impl Handler for NagxHandler {
     type Error = russh::Error;
 
-    async fn check_server_key(&mut self, _server_public_key: &PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        _server_public_key: &PublicKeyOrCertificate,
+    ) -> Result<bool, Self::Error> {
         // Temporary bootstrap behavior. NAGX host-key storage/verification comes next.
         Ok(true)
     }
