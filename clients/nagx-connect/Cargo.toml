@@ -9,6 +9,10 @@ nagx-core = { path = "../../crates/nagx-core" }
 nagx-config = { path = "../../crates/nagx-config" }
 nagx-session = { path = "../../crates/nagx-session" }
 nagx-terminal = { path = "../../crates/nagx-terminal" }
+slint = "1.17.1"
+
+[build-dependencies]
+slint-build = "1.17.1"
 
 [lints]
 workspace = true
