@@ -23,11 +23,10 @@ pub struct PtySession {
 }
 
 impl PtySession {
-    pub async fn send(&self, data: Vec<u8>) -> Result<(), String> {
+    pub fn send(&self, data: Vec<u8>) -> Result<(), String> {
         self.input
-            .send(data)
-            .await
-            .map_err(|_| "PTY input channel closed".to_string())
+            .try_send(data)
+            .map_err(|err| format!("PTY input queue error: {err}"))
     }
 }
 
