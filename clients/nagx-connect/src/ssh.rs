@@ -63,6 +63,12 @@ impl PtySession {
     }
 }
 
+fn default_username() -> String {
+    std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_default()
+}
+
 async fn connect_authenticated(
     host: &str,
     port: u16,
@@ -87,6 +93,12 @@ async fn connect_authenticated(
 
     match auth_mode {
         "password" => {
+            if username.trim().is_empty() {
+                return Err("SSH username is required for password authentication".to_string());
+            }
+            if secret.trim().is_empty() {
+                return Err("SSH password is required for password authentication".to_string());
+            }
             let auth = handle
                 .authenticate_password(username, secret)
                 .await
@@ -111,9 +123,18 @@ async fn connect_authenticated(
                 .map_err(|err| format!("Could not negotiate RSA hash: {err}"))?
                 .flatten();
 
+            let key_username = if username.trim().is_empty() {
+                default_username()
+            } else {
+                username
+            };
+            if key_username.trim().is_empty() {
+                return Err("SSH username is empty and no local username is available. Enter a username.".to_string());
+            }
+
             let auth = handle
                 .authenticate_publickey(
-                    username,
+                    key_username,
                     PrivateKeyWithHashAlg::new(Arc::new(key_pair), rsa_hash),
                 )
                 .await
