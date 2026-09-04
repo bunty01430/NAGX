@@ -6,6 +6,7 @@ slint::include_modules!();
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use arboard::Clipboard;
 use ssh::PtySession;
 use terminal_emulator::TerminalEmulator;
 
@@ -63,6 +64,29 @@ fn terminal_key_bytes(text: &str, control: bool, alt: bool) -> Vec<u8> {
     data
 }
 
+fn paste_from_clipboard(terminal: &Arc<Mutex<TerminalEmulator>>, pty: &PtySession) -> Result<(), String> {
+    let mut clipboard = Clipboard::new().map_err(|err| format!("Clipboard unavailable: {err}"))?;
+    let text = clipboard.get_text().map_err(|err| format!("Clipboard read failed: {err}"))?;
+    if text.is_empty() { return Ok(()); }
+
+    let bracketed = terminal
+        .lock()
+        .map_err(|_| "Terminal mutex poisoned".to_string())?
+        .bracketed_paste_enabled();
+
+    let data = if bracketed {
+        let mut wrapped = Vec::with_capacity(text.len() + 12);
+        wrapped.extend_from_slice(b"\x1b[200~");
+        wrapped.extend_from_slice(text.as_bytes());
+        wrapped.extend_from_slice(b"\x1b[201~");
+        wrapped
+    } else {
+        text.into_bytes()
+    };
+
+    pty.send(data)
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     let window = MainWindow::new()?;
     let active_pty: Arc<Mutex<Option<PtySession>>> = Arc::new(Mutex::new(None));
@@ -78,9 +102,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
         if host.trim().is_empty() || username.trim().is_empty() {
             let _ = slint::invoke_from_event_loop(move || {
-                if let Some(window) = weak_window.upgrade() {
-                    window.set_status_text("INVALID CONNECTION".into());
-                }
+                if let Some(window) = weak_window.upgrade() { window.set_status_text("INVALID CONNECTION".into()); }
             });
             return;
         }
@@ -101,9 +123,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 Err(err) => {
                     let message = format!("RUNTIME ERROR: {err}");
                     let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(window) = weak_window.upgrade() {
-                            window.set_status_text(message.into());
-                        }
+                        if let Some(window) = weak_window.upgrade() { window.set_status_text(message.into()); }
                     });
                     return;
                 }
@@ -122,6 +142,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         move || {
                             if let Some(window) = weak_window.upgrade() {
                                 window.set_status_text("CONNECTED / ANSI PTY".into());
+                                window.set_terminal_plain("NAGX terminal connected.".into());
                                 window.set_terminal_styled(slint::StyledText::from_plain_text("NAGX terminal connected."));
                                 window.set_cursor_visible(true);
                                 window.invoke_focus_terminal();
@@ -131,11 +152,12 @@ fn main() -> Result<(), slint::PlatformError> {
 
                     runtime.block_on(async move {
                         while let Some(bytes) = output_rx.recv().await {
-                            let (markup, (cursor_y, cursor_x), cursor_visible, mouse_reporting) = {
+                            let (markup, plain, (cursor_y, cursor_x), cursor_visible, mouse_reporting) = {
                                 let mut terminal = terminal_for_connect.lock().expect("terminal mutex poisoned");
                                 let markup = terminal.process(&bytes);
+                                let plain = terminal.render();
                                 let position = terminal.cursor_position();
-                                (markup, position, terminal.cursor_visible(), terminal.mouse_reporting_enabled())
+                                (markup, plain, position, terminal.cursor_visible(), terminal.mouse_reporting_enabled())
                             };
 
                             let _ = slint::invoke_from_event_loop({
@@ -145,6 +167,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                         let styled = slint::StyledText::from_markdown(&markup)
                                             .unwrap_or_else(|_| slint::StyledText::from_plain_text(&markup));
                                         window.set_terminal_styled(styled);
+                                        window.set_terminal_plain(plain.into());
                                         window.set_cursor_x(i32::from(cursor_x));
                                         window.set_cursor_y(i32::from(cursor_y));
                                         window.set_cursor_visible(cursor_visible);
@@ -168,9 +191,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 Err(err) => {
                     let message = format!("ERROR: {err}");
                     let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(window) = weak_window.upgrade() {
-                            window.set_status_text(message.into());
-                        }
+                        if let Some(window) = weak_window.upgrade() { window.set_status_text(message.into()); }
                     });
                 }
             }
@@ -178,12 +199,10 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     let pty_for_keyboard = Arc::clone(&active_pty);
-    window.on_terminal_key(move |text, control, alt| {
+    window.on_terminal_key(move |text, control, alt, _shift| {
         let bytes = terminal_key_bytes(text.as_str(), control, alt);
         if bytes.is_empty() { return; }
-        if let Some(pty) = pty_for_keyboard.lock().expect("PTY mutex poisoned").clone() {
-            let _ = pty.send(bytes);
-        }
+        if let Some(pty) = pty_for_keyboard.lock().expect("PTY mutex poisoned").clone() { let _ = pty.send(bytes); }
     });
 
     let pty_for_resize = Arc::clone(&active_pty);
@@ -196,11 +215,8 @@ fn main() -> Result<(), slint::PlatformError> {
 
         {
             let mut terminal = terminal_for_resize.lock().expect("terminal mutex poisoned");
-            if terminal.size() != (rows, cols) {
-                terminal.set_size(rows, cols);
-            }
+            if terminal.size() != (rows, cols) { terminal.set_size(rows, cols); }
         }
-
         if let Some(pty) = pty_for_resize.lock().expect("PTY mutex poisoned").clone() {
             let _ = pty.resize(cols, rows, pixel_width, pixel_height);
         }
@@ -209,22 +225,12 @@ fn main() -> Result<(), slint::PlatformError> {
     let pty_for_mouse = Arc::clone(&active_pty);
     let terminal_for_mouse = Arc::clone(&terminal);
     window.on_terminal_mouse(move |button, kind, x, y, shift, alt, control| {
-        if let Some(bytes) = terminal_for_mouse
-            .lock()
-            .expect("terminal mutex poisoned")
-            .mouse_report(
-                button.clamp(0, 5) as u8,
-                kind.clamp(0, 3) as u8,
-                x.clamp(1, 1000) as u16,
-                y.clamp(1, 1000) as u16,
-                shift,
-                alt,
-                control,
-            )
-        {
-            if let Some(pty) = pty_for_mouse.lock().expect("PTY mutex poisoned").clone() {
-                let _ = pty.send(bytes);
-            }
+        if let Some(bytes) = terminal_for_mouse.lock().expect("terminal mutex poisoned").mouse_report(
+            button.clamp(0, 5) as u8, kind.clamp(0, 3) as u8,
+            x.clamp(1, 1000) as u16, y.clamp(1, 1000) as u16,
+            shift, alt, control,
+        ) {
+            if let Some(pty) = pty_for_mouse.lock().expect("PTY mutex poisoned").clone() { let _ = pty.send(bytes); }
         }
     });
 
@@ -232,14 +238,16 @@ fn main() -> Result<(), slint::PlatformError> {
     let terminal_for_wheel = Arc::clone(&terminal);
     window.on_terminal_wheel(move |delta_y| {
         let button = if delta_y < 0 { 5 } else { 4 };
-        if let Some(bytes) = terminal_for_wheel
-            .lock()
-            .expect("terminal mutex poisoned")
-            .mouse_report(button, 1, 1, 1, false, false, false)
-        {
-            if let Some(pty) = pty_for_wheel.lock().expect("PTY mutex poisoned").clone() {
-                let _ = pty.send(bytes);
-            }
+        if let Some(bytes) = terminal_for_wheel.lock().expect("terminal mutex poisoned").mouse_report(button, 1, 1, 1, false, false, false) {
+            if let Some(pty) = pty_for_wheel.lock().expect("PTY mutex poisoned").clone() { let _ = pty.send(bytes); }
+        }
+    });
+
+    let pty_for_paste = Arc::clone(&active_pty);
+    let terminal_for_paste = Arc::clone(&terminal);
+    window.on_terminal_paste(move || {
+        if let Some(pty) = pty_for_paste.lock().expect("PTY mutex poisoned").clone() {
+            if let Err(err) = paste_from_clipboard(&terminal_for_paste, &pty) { eprintln!("[NAGX] {err}"); }
         }
     });
 
