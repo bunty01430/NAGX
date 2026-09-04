@@ -80,6 +80,10 @@ impl TerminalEmulator {
         self.parser.screen().mouse_protocol_mode() != MouseProtocolMode::None
     }
 
+    pub fn bracketed_paste_enabled(&self) -> bool {
+        self.parser.screen().bracketed_paste()
+    }
+
     pub fn mouse_report(
         &self,
         button: u8,
@@ -104,8 +108,7 @@ impl TerminalEmulator {
         if alt { code |= 8; }
         if control { code |= 16; }
 
-        let wheel = matches!(button, 4 | 5);
-        if wheel {
+        if matches!(button, 4 | 5) {
             code = if button == 4 { 64 } else { 65 };
             if shift { code |= 4; }
             if alt { code |= 8; }
