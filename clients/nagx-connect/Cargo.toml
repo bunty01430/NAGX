@@ -1,0 +1,14 @@
+[package]
+name = "nagx-connect"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nagx-core = { path = "../../crates/nagx-core" }
+nagx-config = { path = "../../crates/nagx-config" }
+nagx-session = { path = "../../crates/nagx-session" }
+nagx-terminal = { path = "../../crates/nagx-terminal" }
+
+[lints]
+workspace = true

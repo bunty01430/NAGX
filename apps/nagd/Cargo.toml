@@ -1,0 +1,13 @@
+[package]
+name = "nagd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nagx-core = { path = "../../crates/nagx-core" }
+nagx-model = { path = "../../crates/nagx-model" }
+nagx-protocol = { path = "../../crates/nagx-protocol" }
+
+[lints]
+workspace = true

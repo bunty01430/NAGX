@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package nagx.nxp.v1;
+
+message Hello {
+  uint32 protocol_major = 1;
+  uint32 protocol_minor = 2;
+  string client_version = 3;
+}
+
+message Welcome {
+  uint32 protocol_major = 1;
+  uint32 protocol_minor = 2;
+  string server_version = 3;
+}
+
+message ResizePty {
+  uint32 cols = 1;
+  uint32 rows = 2;
+}
+
+message TerminalInput { bytes data = 1; }
+message TerminalOutput { bytes data = 1; }
+message Ping { uint64 timestamp_ms = 1; }
+message Pong { uint64 timestamp_ms = 1; }
