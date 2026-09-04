@@ -1,4 +1,4 @@
-use vt100::{Color, Parser};
+use vt100::{Color, MouseProtocolEncoding, MouseProtocolMode, Parser};
 
 pub struct TerminalEmulator {
     parser: Parser,
@@ -93,6 +93,14 @@ impl TerminalEmulator {
     pub fn set_scrollback(&mut self, rows: usize) {
         self.parser.screen_mut().set_scrollback(rows);
     }
+
+    pub fn mouse_reporting_enabled(&self) -> bool {
+        self.parser.screen().mouse_protocol_mode() != MouseProtocolMode::None
+    }
+
+    pub fn mouse_sgr_encoding(&self) -> bool {
+        self.parser.screen().mouse_protocol_encoding() == MouseProtocolEncoding::Sgr
+    }
 }
 
 fn effective_color(color: Color, bold: bool) -> Color {
@@ -108,22 +116,11 @@ fn append_span(markup: &mut String, color: Option<Color>, bold: bool, italic: bo
     markup.push_str(&color_text);
     markup.push_str("'>");
 
-    if bold {
-        markup.push_str("**");
-    }
-    if italic {
-        markup.push('*');
-    }
-
+    if bold { markup.push_str("**"); }
+    if italic { markup.push('*'); }
     markup.push_str(text);
-
-    if italic {
-        markup.push('*');
-    }
-    if bold {
-        markup.push_str("**");
-    }
-
+    if italic { markup.push('*'); }
+    if bold { markup.push_str("**"); }
     markup.push_str("</font>");
 }
 
@@ -133,28 +130,15 @@ fn color_hex(color: Color) -> String {
         Color::Rgb(r, g, b) => (r, g, b),
         Color::Idx(index) => xterm_palette(index),
     };
-
     format!("#{r:02x}{g:02x}{b:02x}")
 }
 
 fn xterm_palette(index: u8) -> (u8, u8, u8) {
     const ANSI: [(u8, u8, u8); 16] = [
-        (0, 0, 0),
-        (205, 0, 0),
-        (0, 205, 0),
-        (205, 205, 0),
-        (0, 0, 238),
-        (205, 0, 205),
-        (0, 205, 205),
-        (229, 229, 229),
-        (127, 127, 127),
-        (255, 0, 0),
-        (0, 255, 0),
-        (255, 255, 0),
-        (92, 92, 255),
-        (255, 0, 255),
-        (0, 255, 255),
-        (255, 255, 255),
+        (0, 0, 0), (205, 0, 0), (0, 205, 0), (205, 205, 0),
+        (0, 0, 238), (205, 0, 205), (0, 205, 205), (229, 229, 229),
+        (127, 127, 127), (255, 0, 0), (0, 255, 0), (255, 255, 0),
+        (92, 92, 255), (255, 0, 255), (0, 255, 255), (255, 255, 255),
     ];
 
     match index {
