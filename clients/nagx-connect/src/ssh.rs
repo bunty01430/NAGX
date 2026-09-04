@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use russh::client::{self, Handler};
 use russh::keys::PublicKeyOrCertificate;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use russh::{ChannelMsg, Disconnect};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 pub struct NagxHandler;
@@ -20,16 +20,44 @@ impl Handler for NagxHandler {
     }
 }
 
+#[derive(Debug)]
+enum PtyCommand {
+    Input(Vec<u8>),
+    Resize {
+        cols: u16,
+        rows: u16,
+        pixel_width: u16,
+        pixel_height: u16,
+    },
+}
+
 #[derive(Clone)]
 pub struct PtySession {
-    input: Sender<Vec<u8>>,
+    commands: Sender<PtyCommand>,
 }
 
 impl PtySession {
     pub fn send(&self, data: Vec<u8>) -> Result<(), String> {
-        self.input
-            .try_send(data)
+        self.commands
+            .try_send(PtyCommand::Input(data))
             .map_err(|err| format!("PTY input queue error: {err}"))
+    }
+
+    pub fn resize(
+        &self,
+        cols: u16,
+        rows: u16,
+        pixel_width: u16,
+        pixel_height: u16,
+    ) -> Result<(), String> {
+        self.commands
+            .try_send(PtyCommand::Resize {
+                cols,
+                rows,
+                pixel_width,
+                pixel_height,
+            })
+            .map_err(|err| format!("PTY resize queue error: {err}"))
     }
 }
 
@@ -73,7 +101,7 @@ pub async fn connect_pty(
 ) -> Result<(PtySession, Receiver<Vec<u8>>), String> {
     let mut handle = connect_password(host, port, username, password).await?;
 
-    let channel = handle
+    let mut channel = handle
         .channel_open_session()
         .await
         .map_err(|err| format!("Could not open SSH session: {err}"))?;
@@ -88,51 +116,59 @@ pub async fn connect_pty(
         .await
         .map_err(|err| format!("Shell request failed: {err}"))?;
 
-    let stream = channel.into_stream();
-    let (mut reader, mut writer) = tokio::io::split(stream);
-
-    let (input_tx, mut input_rx) = mpsc::channel::<Vec<u8>>(256);
+    let (command_tx, mut command_rx) = mpsc::channel::<PtyCommand>(256);
     let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>(256);
 
     tokio::spawn(async move {
-        let mut buf = vec![0_u8; 8192];
-
         loop {
             tokio::select! {
-                input = input_rx.recv() => {
-                    match input {
-                        Some(data) => {
-                            if writer.write_all(&data).await.is_err() {
-                                break;
-                            }
-                            if writer.flush().await.is_err() {
+                command = command_rx.recv() => {
+                    match command {
+                        Some(PtyCommand::Input(data)) => {
+                            if channel.data_bytes(data).await.is_err() {
                                 break;
                             }
                         }
-                        None => {
-                            let _ = writer.shutdown().await;
-                            break;
+                        Some(PtyCommand::Resize { cols, rows, pixel_width, pixel_height }) => {
+                            if channel
+                                .window_change(
+                                    u32::from(cols),
+                                    u32::from(rows),
+                                    u32::from(pixel_width),
+                                    u32::from(pixel_height),
+                                )
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
                         }
+                        None => break,
                     }
                 }
-                read_result = reader.read(&mut buf) => {
-                    match read_result {
-                        Ok(0) => break,
-                        Ok(count) => {
-                            if output_tx.send(buf[..count].to_vec()).await.is_err() {
+                message = channel.wait() => {
+                    match message {
+                        Some(ChannelMsg::Data { data }) => {
+                            if output_tx.send(data.to_vec()).await.is_err() {
                                 break;
                             }
                         }
-                        Err(_) => break,
+                        Some(ChannelMsg::ExtendedData { data, .. }) => {
+                            if output_tx.send(data.to_vec()).await.is_err() {
+                                break;
+                            }
+                        }
+                        Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => break,
+                        _ => {}
                     }
                 }
             }
         }
 
         let _ = handle
-            .disconnect(russh::Disconnect::ByApplication, "NAGX session closed", "English")
+            .disconnect(Disconnect::ByApplication, "NAGX session closed", "English")
             .await;
     });
 
-    Ok((PtySession { input: input_tx }, output_rx))
+    Ok((PtySession { commands: command_tx }, output_rx))
 }
