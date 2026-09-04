@@ -68,10 +68,7 @@ impl TerminalEmulator {
     pub fn set_size(&mut self, rows: u16, cols: u16) {
         let rows = rows.max(1);
         let cols = cols.max(1);
-        self.parser.screen_mut().set_size(
-            std::num::NonZeroU16::new(rows).expect("rows clamped above 0"),
-            std::num::NonZeroU16::new(cols).expect("cols clamped above 0"),
-        );
+        self.parser.screen_mut().set_size(rows, cols);
     }
 
     pub fn set_scrollback(&mut self, rows: usize) { self.parser.screen_mut().set_scrollback(rows); }
@@ -100,97 +97,111 @@ impl TerminalEmulator {
             1 => 0,
             2 => 1,
             3 => 2,
-            _ => 3,
+            4 => 64,
+            5 => 65,
+            _ => return None,
         };
 
-        if kind == 3 { code |= 32; }
-        if shift { code |= 4; }
-        if alt { code |= 8; }
-        if control { code |= 16; }
+        if kind == 3 { code += 32; }
+        if shift { code += 4; }
+        if alt { code += 8; }
+        if control { code += 16; }
 
-        if matches!(button, 4 | 5) {
-            code = if button == 4 { 64 } else { 65 };
-            if shift { code |= 4; }
-            if alt { code |= 8; }
-            if control { code |= 16; }
-        }
-
-        match self.parser.screen().mouse_protocol_encoding() {
+        let encoding = self.parser.screen().mouse_protocol_encoding();
+        match encoding {
+            MouseProtocolEncoding::Utf8 => {
+                let mut data = Vec::new();
+                data.extend_from_slice(b"\x1b[M");
+                push_utf8_code(&mut data, code);
+                push_utf8_code(&mut data, x);
+                push_utf8_code(&mut data, y);
+                Some(data)
+            }
             MouseProtocolEncoding::Sgr => {
                 let suffix = if kind == 2 { 'm' } else { 'M' };
-                Some(format!("\x1b[<{};{};{}{}", code, x.max(1), y.max(1), suffix).into_bytes())
+                Some(format!("\x1b[<{};{};{}{}", code, x, y, suffix).into_bytes())
             }
-            MouseProtocolEncoding::Default | MouseProtocolEncoding::Utf8 => {
-                if x > 223 || y > 223 { return None; }
-                Some(vec![0x1b, b'[', b'M', 32 + code, 32 + x as u8, 32 + y as u8])
+            MouseProtocolEncoding::Urxvt => {
+                Some(format!("\x1b[{};{};{}M", code + 32, x + 32, y + 32).into_bytes())
+            }
+            MouseProtocolEncoding::X10 => {
+                let mut data = Vec::new();
+                data.extend_from_slice(b"\x1b[M");
+                data.push((code + 32).min(255));
+                data.push((x + 32).min(255));
+                data.push((y + 32).min(255));
+                Some(data)
             }
         }
     }
+}
+
+fn push_utf8_code(data: &mut Vec<u8>, value: u16) {
+    let scalar = char::from_u32(u32::from(value) + 32).unwrap_or(' ');
+    let mut buf = [0u8; 4];
+    data.extend_from_slice(scalar.encode_utf8(&mut buf).as_bytes());
 }
 
 fn effective_color(color: Color, bold: bool) -> Color {
-    match color {
-        Color::Idx(index) if bold && index < 8 => Color::Idx(index + 8),
-        other => other,
+    match (color, bold) {
+        (Color::Default, false) => Color::Rgb(215, 222, 232),
+        (Color::Default, true) => Color::Rgb(100, 255, 218),
+        (value, _) => value,
     }
 }
 
-fn append_span(markup: &mut String, color: Option<Color>, bold: bool, italic: bool, text: &str) {
-    let color_text = color.map(color_hex).unwrap_or_else(|| "#d7dee8".to_string());
-    markup.push_str("<font color='");
-    markup.push_str(&color_text);
-    markup.push_str("'>");
-    if bold { markup.push_str("**"); }
-    if italic { markup.push('*'); }
-    markup.push_str(text);
-    if italic { markup.push('*'); }
-    if bold { markup.push_str("**"); }
-    markup.push_str("</font>");
-}
-
-fn color_hex(color: Color) -> String {
-    let (r, g, b) = match color {
-        Color::Default => (215, 222, 232),
-        Color::Rgb(r, g, b) => (r, g, b),
-        Color::Idx(index) => xterm_palette(index),
-    };
-    format!("#{r:02x}{g:02x}{b:02x}")
-}
-
-fn xterm_palette(index: u8) -> (u8, u8, u8) {
-    const ANSI: [(u8, u8, u8); 16] = [
-        (0, 0, 0), (205, 0, 0), (0, 205, 0), (205, 205, 0),
-        (0, 0, 238), (205, 0, 205), (0, 205, 205), (229, 229, 229),
-        (127, 127, 127), (255, 0, 0), (0, 255, 0), (255, 255, 0),
-        (92, 92, 255), (255, 0, 255), (0, 255, 255), (255, 255, 255),
-    ];
-    match index {
-        0..=15 => ANSI[index as usize],
-        16..=231 => {
-            let n = index - 16;
-            (cube_value(n / 36), cube_value((n % 36) / 6), cube_value(n % 6))
-        }
-        _ => {
-            let shade = 8 + (index - 232) * 10;
-            (shade, shade, shade)
-        }
-    }
-}
-
-fn cube_value(value: u8) -> u8 { if value == 0 { 0 } else { 55 + value * 40 } }
-
-fn escape_markup(input: &str, output: &mut String) {
-    for ch in input.chars() {
+fn escape_markup(value: &str, output: &mut String) {
+    for ch in value.chars() {
         match ch {
             '&' => output.push_str("&amp;"),
             '<' => output.push_str("&lt;"),
             '>' => output.push_str("&gt;"),
-            '*' => output.push_str("\\*"),
-            '_' => output.push_str("\\_"),
-            '`' => output.push_str("\\`"),
-            '[' => output.push_str("\\["),
-            ']' => output.push_str("\\]"),
             _ => output.push(ch),
         }
     }
+}
+
+fn append_span(output: &mut String, color: Option<Color>, bold: bool, italic: bool, text: &str) {
+    let Some(color) = color else { output.push_str(text); return; };
+    let color = color_hex(color);
+    if bold && italic {
+        output.push_str(&format!("<b><i><font color=\"{}\">{}</font></i></b>", color, text));
+    } else if bold {
+        output.push_str(&format!("<b><font color=\"{}\">{}</font></b>", color, text));
+    } else if italic {
+        output.push_str(&format!("<i><font color=\"{}\">{}</font></i>", color, text));
+    } else {
+        output.push_str(&format!("<font color=\"{}\">{}</font>", color, text));
+    }
+}
+
+fn color_hex(color: Color) -> String {
+    match color {
+        Color::Default => "#d7dee8".into(),
+        Color::Idx(index) => {
+            let rgb = ansi_index_rgb(index);
+            format!("#{:02x}{:02x}{:02x}", rgb.0, rgb.1, rgb.2)
+        }
+        Color::Rgb(r, g, b) => format!("#{:02x}{:02x}{:02x}", r, g, b),
+    }
+}
+
+fn ansi_index_rgb(index: u8) -> (u8, u8, u8) {
+    const BASIC: [(u8, u8, u8); 16] = [
+        (0, 0, 0), (205, 49, 49), (13, 188, 121), (229, 229, 16),
+        (36, 114, 200), (188, 63, 188), (17, 168, 205), (229, 229, 229),
+        (102, 102, 102), (241, 76, 76), (35, 209, 139), (245, 245, 67),
+        (59, 142, 234), (214, 112, 214), (41, 184, 219), (255, 255, 255),
+    ];
+    if index < 16 { return BASIC[index as usize]; }
+    if (16..=231).contains(&index) {
+        let n = index - 16;
+        let r = (n / 36) % 6;
+        let g = (n / 6) % 6;
+        let b = n % 6;
+        let level = |v: u8| if v == 0 { 0 } else { 55 + 40 * v };
+        return (level(r), level(g), level(b));
+    }
+    let gray = 8 + 10 * (index - 232);
+    (gray, gray, gray)
 }
