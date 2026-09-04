@@ -58,6 +58,7 @@ export component MainWindow inherits Window {
     callback terminal-mouse(int, int, int, int, int, bool, bool, bool);
     callback terminal-wheel(int, int);
     callback terminal-paste(int);
+    callback focus-terminal();
 
     public function select-terminal-ui(slot: int) {
         root.active-terminal = root.clamp-slot(slot);
@@ -65,6 +66,7 @@ export component MainWindow inherits Window {
         root.terminal-focused = true;
         root.logs-focused = false;
         root.select-terminal(root.active-terminal);
+        root.focus-terminal();
     }
     public pure function clamp-slot(slot: int) -> int { return min(max(slot, 1), 3); }
 
@@ -182,24 +184,24 @@ export component MainWindow inherits Window {
                 }
             }
             if root.terminal-minimized : Rectangle { x: root.terminal-x * 1px; y: root.terminal-y * 1px; width: 310px; height: 28px; z: 20; background: #0b1118; border-width: 1px; border-color: #18212c;
-                HorizontalBox { Text { text: "NAGX T" + root.active-terminal + " minimized"; color: #718096; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Button { text: "Restore"; clicked => { root.terminal-minimized = false; root.terminal-focused = true; } } }
+                HorizontalBox { Text { text: "NAGX T" + root.active-terminal + " minimized"; color: #718096; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Button { text: "Restore"; clicked => { root.terminal-minimized = false; root.terminal-focused = true; root.focus-terminal(); } } }
             }
             if root.logs-open : Rectangle { x: root.logs-x * 1px; y: root.logs-y * 1px; width: root.logs-width * 1px; height: root.logs-height * 1px; z: 10; background: #05080c; border-width: 1px; border-color: root.logs-focused ? #31546a : #18212c;
                 Rectangle { width: parent.width; height: 28px; background: root.logs-focused ? #0f1820 : #0b1118;
                     Text { x: 10px; text: "NAGX LOGS"; color: #d7dee8; font-size: 12px; vertical-alignment: center; }
-                    Button { x: parent.width - 36px; width: 36px; height: 28px; text: "×"; clicked => { root.logs-open = false; root.logs-focused = false; root.terminal-focused = true; } }
+                    Button { x: parent.width - 36px; width: 36px; height: 28px; text: "×"; clicked => { root.logs-open = false; root.logs-focused = false; root.terminal-focused = true; root.focus-terminal(); } }
                 }
-                Text { x: 14px; y: 42px; text: "[system]\n[ssh] terminal session events\n[pty] three-slot transport\n[services] telemetry pending"; color: #9aa7b6; font-size: 12px; }
+                Text { x: 14px; y: 42px; text: "Event stream · system · services · security"; color: #8c98a6; font-size: 11px; }
+                Text { x: 14px; y: 72px; text: "[NAGX] waiting for server events…"; color: #4f5d6b; font-size: 11px; }
             }
         }
-        Rectangle { height: 38px; background: #0a0f15;
-            HorizontalBox { padding-left: 10px; spacing: 8px;
-                Button { text: "T1"; clicked => { root.select-terminal-ui(1); } }
-                Button { text: "T2"; clicked => { root.select-terminal-ui(2); } }
-                Button { text: "T3"; clicked => { root.select-terminal-ui(3); } }
-                Button { text: "Logs"; clicked => { root.logs-open = true; root.logs-focused = true; root.terminal-focused = false; } }
+        Rectangle { height: 28px; background: #0a0f15;
+            HorizontalBox { padding-left: 12px; padding-right: 12px; spacing: 12px;
+                Text { text: "T1:" + root.terminal-1-state; color: #8c98a6; font-size: 10px; }
+                Text { text: "T2:" + root.terminal-2-state; color: #8c98a6; font-size: 10px; }
+                Text { text: "T3:" + root.terminal-3-state; color: #8c98a6; font-size: 10px; }
                 Rectangle { horizontal-stretch: 1; }
-                Text { text: "NAGX / native client / SSH + PEM + PPK"; color: #4f5d6b; font-size: 10px; vertical-alignment: center; }
+                Text { text: root.active-workspace == 0 ? "OVERVIEW" : root.active-workspace == 1 ? "DEVELOPMENT" : root.active-workspace == 2 ? "MONITORING" : "OPERATIONS"; color: #64ffda; font-size: 10px; }
             }
         }
     }
