@@ -1,8 +1,9 @@
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use russh::client::{self, Handler};
-use russh::keys::PublicKeyOrCertificate;
+use russh::keys::{load_secret_key, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::{ChannelMsg, Disconnect};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::time::timeout;
@@ -62,11 +63,13 @@ impl PtySession {
     }
 }
 
-pub async fn connect_password(
-    host: String,
+async fn connect_authenticated(
+    host: &str,
     port: u16,
     username: String,
-    password: String,
+    auth_mode: &str,
+    secret: String,
+    passphrase: String,
 ) -> Result<client::Handle<NagxHandler>, String> {
     let config = client::Config {
         inactivity_timeout: Some(Duration::from_secs(30)),
@@ -76,31 +79,92 @@ pub async fn connect_password(
 
     let mut handle = client::connect(
         Arc::new(config),
-        (host.as_str(), port),
+        (host, port),
         NagxHandler,
     )
     .await
     .map_err(|err| format!("SSH connection failed: {err}"))?;
 
-    let auth = handle
-        .authenticate_password(username, password)
-        .await
-        .map_err(|err| format!("SSH authentication failed: {err}"))?;
+    match auth_mode {
+        "password" => {
+            let auth = handle
+                .authenticate_password(username, secret)
+                .await
+                .map_err(|err| format!("SSH password authentication failed: {err}"))?;
+            if !auth.success() {
+                return Err("SSH password authentication rejected".to_string());
+            }
+        }
+        "key" => {
+            let key_path = Path::new(&secret);
+            if !key_path.is_file() {
+                return Err(format!("SSH private key not found: {}", key_path.display()));
+            }
 
-    if !auth.success() {
-        return Err("SSH authentication rejected by server".to_string());
+            let password = if passphrase.is_empty() { None } else { Some(passphrase.as_str()) };
+            let key_pair = load_secret_key(key_path, password)
+                .map_err(|err| format!("Could not load SSH private key: {err}"))?;
+
+            let rsa_hash = handle
+                .best_supported_rsa_hash()
+                .await
+                .map_err(|err| format!("Could not negotiate RSA hash: {err}"))?
+                .flatten();
+
+            let auth = handle
+                .authenticate_publickey(
+                    username,
+                    PrivateKeyWithHashAlg::new(Arc::new(key_pair), rsa_hash),
+                )
+                .await
+                .map_err(|err| format!("SSH public-key authentication failed: {err}"))?;
+
+            if !auth.success() {
+                return Err("SSH public-key authentication rejected".to_string());
+            }
+        }
+        other => return Err(format!("Unsupported SSH authentication mode: {other}")),
     }
 
     Ok(handle)
+}
+
+pub async fn connect_password(
+    host: String,
+    port: u16,
+    username: String,
+    password: String,
+) -> Result<client::Handle<NagxHandler>, String> {
+    connect_authenticated(&host, port, username, "password", password, String::new()).await
+}
+
+pub async fn connect_key(
+    host: String,
+    port: u16,
+    username: String,
+    key_path: String,
+    passphrase: String,
+) -> Result<client::Handle<NagxHandler>, String> {
+    connect_authenticated(&host, port, username, "key", key_path, passphrase).await
 }
 
 pub async fn connect_pty(
     host: String,
     port: u16,
     username: String,
-    password: String,
+    auth_mode: String,
+    secret: String,
+    passphrase: String,
 ) -> Result<(PtySession, Receiver<Vec<u8>>), String> {
-    let mut handle = connect_password(host, port, username, password).await?;
+    let mut handle = connect_authenticated(
+        &host,
+        port,
+        username,
+        auth_mode.as_str(),
+        secret,
+        passphrase,
+    )
+    .await?;
 
     let mut channel = handle
         .channel_open_session()
