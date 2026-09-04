@@ -10,11 +10,14 @@ export component MainWindow inherits Window {
 
     property <string> status-text: "DISCONNECTED";
     property <string> server-text: "No server connected";
-    property <string> terminal-text: "NAGX terminal offline.";
+    property <styled-text> terminal-styled: @markdown("NAGX terminal offline.");
+    property <int> cursor-x: 0;
+    property <int> cursor-y: 0;
+    property <bool> cursor-visible: false;
 
     callback connect(string, string, string);
     callback terminal-key(string, bool, bool);
-    function focus-terminal() { terminal-output.focus(); }
+    function focus-terminal() { terminal-input.focus(); }
 
     VerticalBox {
         spacing: 0px;
@@ -126,7 +129,7 @@ export component MainWindow inherits Window {
                         Rectangle { horizontal-stretch: 1; }
 
                         Text {
-                            text: "VT100 / PTY / 120×32";
+                            text: "VT100 / ANSI / 120×32";
                             color: #718096;
                             font-size: 11px;
                         }
@@ -138,19 +141,39 @@ export component MainWindow inherits Window {
                         border-width: 1px;
                         border-color: #18212c;
 
-                        terminal-output := TextEdit {
+                        StyledText {
+                            x: 10px;
+                            y: 8px;
+                            width: parent.width - 20px;
+                            height: parent.height - 16px;
+                            text: root.terminal-styled;
+                            font-family: "Cascadia Mono";
+                            font-size: 14px;
+                        }
+
+                        terminal-input := TextEdit {
                             width: parent.width;
                             height: parent.height;
-                            text: root.terminal-text;
-                            read-only: true;
-                            wrap: no-wrap;
-                            font-family: "Consolas";
-                            font-size: 14px;
-                            color: #d7dee8;
+                            text: "";
+                            read-only: false;
+                            color: transparent;
+                            selection-foreground-color: transparent;
+                            selection-background-color: transparent;
+                            background: transparent;
+                            cursor-width: 0px;
                             key-pressed(event) => {
                                 root.terminal-key(event.text, event.modifiers.control, event.modifiers.alt);
                                 accept
                             }
+                        }
+
+                        Rectangle {
+                            visible: root.cursor-visible;
+                            x: 10px + root.cursor-x * 8.45px;
+                            y: 8px + root.cursor-y * 17.0px;
+                            width: 2px;
+                            height: 16px;
+                            background: #64ffda;
                         }
                     }
                 }
