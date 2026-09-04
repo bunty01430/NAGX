@@ -14,9 +14,7 @@ impl TerminalEmulator {
         self.render_markup()
     }
 
-    pub fn render(&self) -> String {
-        self.parser.screen().contents()
-    }
+    pub fn render(&self) -> String { self.parser.screen().contents() }
 
     pub fn render_markup(&self) -> String {
         let screen = self.parser.screen();
@@ -49,10 +47,7 @@ impl TerminalEmulator {
                     current_italic = italic;
                 }
 
-                if cell.is_wide_continuation() {
-                    continue;
-                }
-
+                if cell.is_wide_continuation() { continue; }
                 let value = if cell.has_contents() { cell.contents() } else { " " };
                 escape_markup(value, &mut run);
             }
@@ -60,26 +55,15 @@ impl TerminalEmulator {
             if !run.is_empty() {
                 append_span(&mut markup, current_fg, current_bold, current_italic, &run);
             }
-
-            if row + 1 < rows {
-                markup.push('\n');
-            }
+            if row + 1 < rows { markup.push('\n'); }
         }
 
         markup
     }
 
-    pub fn cursor_position(&self) -> (u16, u16) {
-        self.parser.screen().cursor_position()
-    }
-
-    pub fn cursor_visible(&self) -> bool {
-        !self.parser.screen().hide_cursor()
-    }
-
-    pub fn size(&self) -> (u16, u16) {
-        self.parser.screen().size()
-    }
+    pub fn cursor_position(&self) -> (u16, u16) { self.parser.screen().cursor_position() }
+    pub fn cursor_visible(&self) -> bool { !self.parser.screen().hide_cursor() }
+    pub fn size(&self) -> (u16, u16) { self.parser.screen().size() }
 
     pub fn set_size(&mut self, rows: u16, cols: u16) {
         let rows = rows.max(1);
@@ -90,16 +74,54 @@ impl TerminalEmulator {
         );
     }
 
-    pub fn set_scrollback(&mut self, rows: usize) {
-        self.parser.screen_mut().set_scrollback(rows);
-    }
+    pub fn set_scrollback(&mut self, rows: usize) { self.parser.screen_mut().set_scrollback(rows); }
 
     pub fn mouse_reporting_enabled(&self) -> bool {
         self.parser.screen().mouse_protocol_mode() != MouseProtocolMode::None
     }
 
-    pub fn mouse_sgr_encoding(&self) -> bool {
-        self.parser.screen().mouse_protocol_encoding() == MouseProtocolEncoding::Sgr
+    pub fn mouse_report(
+        &self,
+        button: u8,
+        kind: u8,
+        x: u16,
+        y: u16,
+        shift: bool,
+        alt: bool,
+        control: bool,
+    ) -> Option<Vec<u8>> {
+        if !self.mouse_reporting_enabled() { return None; }
+
+        let mut code = match button {
+            1 => 0,
+            2 => 1,
+            3 => 2,
+            _ => 3,
+        };
+
+        if kind == 3 { code |= 32; }
+        if shift { code |= 4; }
+        if alt { code |= 8; }
+        if control { code |= 16; }
+
+        let wheel = matches!(button, 4 | 5);
+        if wheel {
+            code = if button == 4 { 64 } else { 65 };
+            if shift { code |= 4; }
+            if alt { code |= 8; }
+            if control { code |= 16; }
+        }
+
+        match self.parser.screen().mouse_protocol_encoding() {
+            MouseProtocolEncoding::Sgr => {
+                let suffix = if kind == 2 { 'm' } else { 'M' };
+                Some(format!("\x1b[<{};{};{}{}", code, x.max(1), y.max(1), suffix).into_bytes())
+            }
+            MouseProtocolEncoding::Default | MouseProtocolEncoding::Utf8 => {
+                if x > 223 || y > 223 { return None; }
+                Some(vec![0x1b, b'[', b'M', 32 + code, 32 + x as u8, 32 + y as u8])
+            }
+        }
     }
 }
 
@@ -115,7 +137,6 @@ fn append_span(markup: &mut String, color: Option<Color>, bold: bool, italic: bo
     markup.push_str("<font color='");
     markup.push_str(&color_text);
     markup.push_str("'>");
-
     if bold { markup.push_str("**"); }
     if italic { markup.push('*'); }
     markup.push_str(text);
@@ -140,15 +161,11 @@ fn xterm_palette(index: u8) -> (u8, u8, u8) {
         (127, 127, 127), (255, 0, 0), (0, 255, 0), (255, 255, 0),
         (92, 92, 255), (255, 0, 255), (0, 255, 255), (255, 255, 255),
     ];
-
     match index {
         0..=15 => ANSI[index as usize],
         16..=231 => {
             let n = index - 16;
-            let r = n / 36;
-            let g = (n % 36) / 6;
-            let b = n % 6;
-            (cube_value(r), cube_value(g), cube_value(b))
+            (cube_value(n / 36), cube_value((n % 36) / 6), cube_value(n % 6))
         }
         _ => {
             let shade = 8 + (index - 232) * 10;
@@ -157,9 +174,7 @@ fn xterm_palette(index: u8) -> (u8, u8, u8) {
     }
 }
 
-fn cube_value(value: u8) -> u8 {
-    if value == 0 { 0 } else { 55 + value * 40 }
-}
+fn cube_value(value: u8) -> u8 { if value == 0 { 0 } else { 55 + value * 40 } }
 
 fn escape_markup(input: &str, output: &mut String) {
     for ch in input.chars() {
