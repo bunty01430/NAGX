@@ -64,10 +64,7 @@ export component MainWindow inherits Window {
     callback terminal-wheel(int, int);
     callback terminal-paste(int);
 
-    public function focus-terminal() {
-        root.focus-terminal-request = !root.focus-terminal-request;
-        terminal-input.focus();
-    }
+    public function focus-terminal() { root.focus-terminal-request = !root.focus-terminal-request; }
     public function focus-terminal-window() { root.terminal-focused = true; root.logs-focused = false; root.terminal-minimized = false; root.select-terminal(root.active-terminal); root.focus-terminal(); }
     public function focus-logs-window() { root.logs-focused = true; root.terminal-focused = false; }
     public function select-terminal-ui(slot: int) { root.active-terminal = root.clamp-slot(slot); root.terminal-minimized = false; root.terminal-focused = true; root.logs-focused = false; root.select-terminal(root.active-terminal); root.focus-terminal(); }
@@ -153,9 +150,6 @@ export component MainWindow inherits Window {
                             text: root.active-terminal == 1 ? root.terminal-1-plain : root.active-terminal == 2 ? root.terminal-2-plain : root.terminal-3-plain;
                             read-only: true;
                             wrap: no-wrap;
-                            color: rgba(2, 4, 7, 0);
-                            selection-background-color: #2b5368;
-                            selection-foreground-color: #ffffff;
                             key-pressed(event) => {
                                 if event.modifiers.alt {
                                     if event.text == "1" { root.select-terminal-ui(1); accept; }
@@ -181,7 +175,7 @@ export component MainWindow inherits Window {
                             }
                             scroll-event(event) => { root.terminal-wheel(root.active-terminal, event.delta-y / 1px); accept }
                         }
-                        Rectangle { visible: root.active-terminal == 1 ? root.terminal-1-cursor-visible : root.active-terminal == 2 ? root.terminal-2-cursor-visible : root.terminal-3-cursor-visible; x: (root.active-terminal == 1 ? root.terminal-1-cursor-x : root.active-terminal == 2 ? root.terminal-2-cursor-x : root.terminal-3-cursor-x) * 8.45px; y: (root.active-terminal == 1 ? root.terminal-1-cursor-y : root.active-terminal == 2 ? root.terminal-2-cursor-y : root.terminal-3-cursor-y) * 17px; width: 2px; height: 16px; background: #64ffda; }
+                        Rectangle { visible: root.active-terminal == 1 ? root.terminal-1-cursor-visible : root.active-terminal == 2 ? root.terminal-2-cursor-visible : root.terminal-3-cursor-visible; x: (root.active-terminal == 1 ? root.terminal-1-cursor-x : root.active-terminal == 2 ? root.terminal-2-cursor-x : root.terminal-3-cursor-x) * 8.45px; y: (root.active-terminal == 1 ? root.terminal-1-cursor-y : root.terminal-2-cursor-y : root.terminal-3-cursor-y) * 17px; width: 2px; height: 16px; background: #64ffda; }
                     }
                 }
                 TouchArea { x: parent.width - 18px; y: parent.height - 18px; width: 18px; height: 18px; mouse-cursor: se-resize;
