@@ -70,12 +70,29 @@ fn push_utf8_code(data: &mut Vec<u8>, value: u16) {
 }
 fn effective_color(color: Color, bold: bool) -> Color { match (color, bold) { (Color::Default, false) => Color::Rgb(215,222,232), (Color::Default,true) => Color::Rgb(100,255,218), (value,_) => value } }
 fn escape_markup(value: &str, output: &mut String) { for ch in value.chars() { match ch { '&' => output.push_str("&amp;"), '<' => output.push_str("&lt;"), '>' => output.push_str("&gt;"), _ => output.push(ch) } } }
+
 fn append_span(output: &mut String, color: Option<Color>, bold: bool, italic: bool, text: &str) {
-    let Some(color) = color else { output.push_str(text); return; }; let color = color_hex(color);
-    if bold && italic { output.push_str(&format!("<b><i><font color=\"{}\">{}</font></i></b>",color,text)); }
-    else if bold { output.push_str(&format!("<b><font color=\"{}\">{}</font></b>",color,text)); }
-    else if italic { output.push_str(&format!("<i><font color=\"{}\">{}</font></i>",color,text)); }
-    else { output.push_str(&format!("<font color=\"{}\">{}</font>",color,text)); }
+    let Some(color) = color else { output.push_str(text); return; };
+    let color = color_hex(color);
+    output.push_str("<font color='");
+    output.push_str(&color);
+    output.push_str("'>");
+    if bold && italic {
+        output.push_str("***");
+        output.push_str(text);
+        output.push_str("***");
+    } else if bold {
+        output.push_str("**");
+        output.push_str(text);
+        output.push_str("**");
+    } else if italic {
+        output.push('_');
+        output.push_str(text);
+        output.push('_');
+    } else {
+        output.push_str(text);
+    }
+    output.push_str("</font>");
 }
 fn color_hex(color: Color) -> String { match color { Color::Default => "#d7dee8".into(), Color::Idx(index) => { let rgb=ansi_index_rgb(index); format!("#{:02x}{:02x}{:02x}",rgb.0,rgb.1,rgb.2) }, Color::Rgb(r,g,b) => format!("#{:02x}{:02x}{:02x}",r,g,b) } }
 fn ansi_index_rgb(index: u8) -> (u8,u8,u8) {
