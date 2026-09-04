@@ -11,7 +11,7 @@ nagx-session = { path = "../../crates/nagx-session" }
 nagx-terminal = { path = "../../crates/nagx-terminal" }
 slint = "1.17.1"
 russh = "0.63.2"
-tokio = { version = "1.47", features = ["rt-multi-thread", "sync"] }
+tokio = { version = "1.47", features = ["rt-multi-thread", "sync", "io-util", "time"] }
 
 [build-dependencies]
 slint-build = "1.17.1"
