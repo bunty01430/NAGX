@@ -189,7 +189,7 @@ pub async fn connect_pty(
         (auth_mode, secret, passphrase)
     };
 
-    let mut handle = connect_authenticated(
+    let handle = connect_authenticated(
         &host,
         port,
         username,
