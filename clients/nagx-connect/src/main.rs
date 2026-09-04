@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use arboard::Clipboard;
+use rfd::FileDialog;
 use ssh::PtySession;
 use terminal_emulator::TerminalEmulator;
 
@@ -171,7 +172,7 @@ fn spawn_terminal_connection(
             }
         };
 
-        match runtime.block_on(ssh::connect_pty(host.clone(), 22, username.clone(), password)) {
+        match runtime.block_on(ssh::connect_pty(host.clone(), 22, username.clone(), "password".to_string(), password, String::new())) {
             Ok((pty, mut output_rx)) => {
                 if let Ok(mut slots) = ptys.lock() { slots[slot] = Some(pty.clone()); }
                 if let Ok(mut slots) = terminals.lock() { slots[slot] = TerminalEmulator::new(32, 120, 2000); }
@@ -296,6 +297,21 @@ fn main() -> Result<(), slint::PlatformError> {
         TerminalEmulator::new(32, 120, 2000),
         TerminalEmulator::new(32, 120, 2000),
     ]));
+
+    let weak_for_browse = window.as_weak();
+    window.on_browse_key(move || {
+        if let Some(path) = FileDialog::new()
+            .set_title("Select SSH private key")
+            .add_filter("SSH private keys", &["pem", "ppk", "key"])
+            .add_filter("All files", &["*"])
+            .pick_file()
+        {
+            if let Some(window) = weak_for_browse.upgrade() {
+                window.set_key_path(path.to_string_lossy().to_string().into());
+                window.set_status_text("PRIVATE KEY SELECTED".into());
+            }
+        }
+    });
 
     let weak_for_connect = window.as_weak();
     let ptys_for_connect = Arc::clone(&ptys);
