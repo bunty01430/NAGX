@@ -10,6 +10,7 @@ export component MainWindow inherits Window {
 
     property <string> status-text: "DISCONNECTED";
     property <string> server-text: "No server connected";
+    callback connect(string, string, string);
 
     VerticalBox {
         spacing: 0px;
@@ -50,12 +51,12 @@ export component MainWindow inherits Window {
             spacing: 0px;
 
             Rectangle {
-                width: 250px;
+                width: 280px;
                 background: #0a0e14;
 
                 VerticalBox {
                     padding: 18px;
-                    spacing: 14px;
+                    spacing: 12px;
 
                     Text {
                         text: "CONNECTION";
@@ -64,11 +65,24 @@ export component MainWindow inherits Window {
                     }
 
                     LineEdit {
-                        placeholder-text: "user@host";
+                        id: host-input;
+                        placeholder-text: "host or IP";
+                    }
+
+                    LineEdit {
+                        id: user-input;
+                        placeholder-text: "username";
+                    }
+
+                    LineEdit {
+                        id: password-input;
+                        placeholder-text: "password";
+                        input-type: password;
                     }
 
                     Button {
                         text: "CONNECT";
+                        clicked => { root.connect(host-input.text, user-input.text, password-input.text); }
                     }
 
                     Rectangle { vertical-stretch: 1; }
@@ -108,7 +122,7 @@ export component MainWindow inherits Window {
                         border-color: #18212c;
 
                         Text {
-                            text: "Native terminal workspace\n\nSSH transport: next layer\nReal PTY: next layer\nTelemetry: next layer\n\nThe shell will remain fully native.\nCommands such as git, vim, docker and\nsystemctl will run unchanged on Linux.";
+                            text: "SSH transport: ACTIVE\n\nThis stage establishes a real authenticated\nSSH connection to the Linux server.\n\nNext: real PTY shell, terminal rendering,\nresize/signals, and session recovery.";
                             color: #9aa7b6;
                             font-size: 14px;
                             x: 22px;
