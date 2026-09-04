@@ -156,13 +156,25 @@ pub async fn connect_pty(
     secret: String,
     passphrase: String,
 ) -> Result<(PtySession, Receiver<Vec<u8>>), String> {
+    // The native UI keeps the four-string connection callback stable. Key mode is
+    // represented as "NAGXKEY:<path>\n<passphrase>" in the secret argument.
+    let (actual_mode, actual_secret, actual_passphrase) = if auth_mode == "password" && secret.starts_with("NAGXKEY:") {
+        let payload = &secret[8..];
+        let mut parts = payload.splitn(2, '\n');
+        let key_path = parts.next().unwrap_or_default().to_string();
+        let key_passphrase = parts.next().unwrap_or_default().to_string();
+        ("key".to_string(), key_path, key_passphrase)
+    } else {
+        (auth_mode, secret, passphrase)
+    };
+
     let mut handle = connect_authenticated(
         &host,
         port,
         username,
-        auth_mode.as_str(),
-        secret,
-        passphrase,
+        actual_mode.as_str(),
+        actual_secret,
+        actual_passphrase,
     )
     .await?;
 
