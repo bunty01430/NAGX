@@ -1,151 +1,105 @@
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 
-use russh::client::{self, Handler};
-use russh::keys::{load_secret_key, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
-use russh::{ChannelMsg, Disconnect};
-use tokio::sync::mpsc::{self, Receiver, Sender};
-use tokio::time::timeout;
+use russh::client::{self, Handle, Handler};
+use russh::keys::{self, load_secret_key, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
+use russh::{ChannelMsg, CryptoVec};
+use tokio::sync::mpsc;
 
-pub struct NagxHandler;
+struct ClientHandler;
 
-impl Handler for NagxHandler {
-    type Error = russh::Error;
+impl Handler for ClientHandler {
+    type Error = anyhow::Error;
 
-    async fn check_server_key(
-        &mut self,
-        _server_public_key: &PublicKeyOrCertificate,
-    ) -> Result<bool, Self::Error> {
+    async fn check_server_key(&mut self, _server_public_key: &PublicKeyOrCertificate) -> Result<bool, Self::Error> {
         // Temporary bootstrap behavior. NAGX host-key storage/verification comes next.
         Ok(true)
     }
 }
 
-#[derive(Debug)]
-enum PtyCommand {
-    Input(Vec<u8>),
-    Resize {
-        cols: u16,
-        rows: u16,
-        pixel_width: u16,
-        pixel_height: u16,
-    },
-}
-
 #[derive(Clone)]
 pub struct PtySession {
-    commands: Sender<PtyCommand>,
+    tx: mpsc::UnboundedSender<PtyCommand>,
+}
+
+enum PtyCommand {
+    Input(Vec<u8>),
+    Resize { cols: u16, rows: u16, pixel_width: u16, pixel_height: u16 },
 }
 
 impl PtySession {
     pub fn send(&self, data: Vec<u8>) -> Result<(), String> {
-        self.commands
-            .try_send(PtyCommand::Input(data))
-            .map_err(|err| format!("PTY input queue error: {err}"))
+        self.tx.send(PtyCommand::Input(data)).map_err(|_| "PTY input channel closed".to_string())
     }
 
-    pub fn resize(
-        &self,
-        cols: u16,
-        rows: u16,
-        pixel_width: u16,
-        pixel_height: u16,
-    ) -> Result<(), String> {
-        self.commands
-            .try_send(PtyCommand::Resize {
-                cols,
-                rows,
-                pixel_width,
-                pixel_height,
-            })
-            .map_err(|err| format!("PTY resize queue error: {err}"))
+    pub fn resize(&self, cols: u16, rows: u16, pixel_width: u16, pixel_height: u16) -> Result<(), String> {
+        self.tx
+            .send(PtyCommand::Resize { cols, rows, pixel_width, pixel_height })
+            .map_err(|_| "PTY resize channel closed".to_string())
+    }
+}
+
+struct SessionChannelHandler {
+    output_tx: mpsc::UnboundedSender<Vec<u8>>,
+}
+
+impl Handler for SessionChannelHandler {
+    type Error = anyhow::Error;
+
+    async fn check_server_key(&mut self, _server_public_key: &PublicKeyOrCertificate) -> Result<bool, Self::Error> {
+        Ok(true)
     }
 }
 
 async fn connect_authenticated(
     host: &str,
     port: u16,
-    username: String,
+    username: &str,
     auth_mode: &str,
     secret: String,
     passphrase: String,
-) -> Result<client::Handle<NagxHandler>, String> {
-    let config = client::Config {
-        inactivity_timeout: Some(Duration::from_secs(30)),
-        keepalive_interval: Some(Duration::from_secs(10)),
-        ..Default::default()
-    };
-
-    let mut handle = client::connect(
-        Arc::new(config),
-        (host, port),
-        NagxHandler,
-    )
-    .await
-    .map_err(|err| format!("SSH connection failed: {err}"))?;
+) -> Result<Handle<ClientHandler>, String> {
+    let config = client::Config::default();
+    let config = Arc::new(config);
+    let mut handle = client::connect(config, (host, port), ClientHandler)
+        .await
+        .map_err(|err| format!("SSH connection failed: {err}"))?;
 
     match auth_mode {
         "password" => {
-            let auth = handle
+            let authenticated = handle
                 .authenticate_password(username, secret)
                 .await
                 .map_err(|err| format!("SSH password authentication failed: {err}"))?;
-            if !auth.success() {
-                return Err("SSH password authentication rejected".to_string());
-            }
+            if !authenticated { return Err("SSH password authentication rejected".to_string()); }
         }
         "key" => {
             let key_path = Path::new(&secret);
-            if !key_path.is_file() {
-                return Err(format!("SSH private key not found: {}", key_path.display()));
-            }
-
-            let password = if passphrase.is_empty() { None } else { Some(passphrase.as_str()) };
-            let key_pair = load_secret_key(key_path, password)
+            let key_password = if passphrase.is_empty() { None } else { Some(passphrase.as_str()) };
+            let key = load_secret_key(key_path, key_password)
                 .map_err(|err| format!("Could not load SSH private key: {err}"))?;
-
-            let rsa_hash = handle
-                .best_supported_rsa_hash()
-                .await
-                .map_err(|err| format!("Could not negotiate RSA hash: {err}"))?
-                .flatten();
-
-            let auth = handle
-                .authenticate_publickey(
-                    username,
-                    PrivateKeyWithHashAlg::new(Arc::new(key_pair), rsa_hash),
-                )
+            let key = PrivateKeyWithHashAlg::new(
+                key,
+                if key.key_type() == keys::key::KeyPairType::RSA { Some(keys::HashAlg::Sha2_512) } else { None },
+            );
+            let authenticated = handle
+                .authenticate_publickey(username, key)
                 .await
                 .map_err(|err| format!("SSH public-key authentication failed: {err}"))?;
-
-            if !auth.success() {
-                return Err("SSH public-key authentication rejected".to_string());
-            }
+            if !authenticated { return Err("SSH public-key authentication rejected".to_string()); }
         }
-        other => return Err(format!("Unsupported SSH authentication mode: {other}")),
+        other => return Err(format!("Unsupported authentication mode: {other}")),
     }
 
     Ok(handle)
 }
 
-pub async fn connect_password(
-    host: String,
-    port: u16,
-    username: String,
-    password: String,
-) -> Result<client::Handle<NagxHandler>, String> {
-    connect_authenticated(&host, port, username, "password", password, String::new()).await
+pub async fn connect_password(host: String, port: u16, username: String, password: String) -> Result<Handle<ClientHandler>, String> {
+    connect_authenticated(&host, port, &username, "password", password, String::new()).await
 }
 
-pub async fn connect_key(
-    host: String,
-    port: u16,
-    username: String,
-    key_path: String,
-    passphrase: String,
-) -> Result<client::Handle<NagxHandler>, String> {
-    connect_authenticated(&host, port, username, "key", key_path, passphrase).await
+pub async fn connect_key(host: String, port: u16, username: String, key_path: String, passphrase: String) -> Result<Handle<ClientHandler>, String> {
+    connect_authenticated(&host, port, &username, "key", key_path, passphrase).await
 }
 
 pub async fn connect_pty(
@@ -155,26 +109,14 @@ pub async fn connect_pty(
     auth_mode: String,
     secret: String,
     passphrase: String,
-) -> Result<(PtySession, Receiver<Vec<u8>>), String> {
-    // The native UI keeps the four-string connection callback stable. Key mode is
-    // represented as "NAGXKEY:<path>\n<passphrase>" in the secret argument.
-    let (actual_mode, actual_secret, actual_passphrase) = if auth_mode == "password" && secret.starts_with("NAGXKEY:") {
-        let payload = &secret[8..];
-        let mut parts = payload.splitn(2, '\n');
-        let key_path = parts.next().unwrap_or_default().to_string();
-        let key_passphrase = parts.next().unwrap_or_default().to_string();
-        ("key".to_string(), key_path, key_passphrase)
-    } else {
-        (auth_mode, secret, passphrase)
-    };
-
-    let mut handle = connect_authenticated(
+) -> Result<(PtySession, mpsc::UnboundedReceiver<Vec<u8>>), String> {
+    let handle = connect_authenticated(
         &host,
         port,
-        username,
-        actual_mode.as_str(),
-        actual_secret,
-        actual_passphrase,
+        &username,
+        auth_mode.as_str(),
+        secret,
+        passphrase,
     )
     .await?;
 
@@ -186,66 +128,44 @@ pub async fn connect_pty(
     channel
         .request_pty(false, "xterm-256color", 120, 32, 0, 0, &[])
         .await
-        .map_err(|err| format!("PTY request failed: {err}"))?;
+        .map_err(|err| format!("Could not request SSH PTY: {err}"))?;
 
     channel
-        .request_shell(true)
+        .shell(true)
         .await
-        .map_err(|err| format!("Shell request failed: {err}"))?;
+        .map_err(|err| format!("Could not start SSH shell: {err}"))?;
 
-    let (command_tx, mut command_rx) = mpsc::channel::<PtyCommand>(256);
-    let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>(256);
+    let (tx, mut command_rx) = mpsc::unbounded_channel();
+    let (output_tx, output_rx) = mpsc::unbounded_channel();
 
     tokio::spawn(async move {
         loop {
-            match timeout(Duration::from_millis(20), channel.wait()).await {
-                Ok(Some(ChannelMsg::Data { data })) => {
-                    if output_tx.send(data.to_vec()).await.is_err() {
-                        break;
+            tokio::select! {
+                Some(command) = command_rx.recv() => {
+                    match command {
+                        PtyCommand::Input(data) => {
+                            let _ = channel.data(CryptoVec::from(data)).await;
+                        }
+                        PtyCommand::Resize { cols, rows, pixel_width, pixel_height } => {
+                            let _ = channel.window_change(cols, rows, pixel_width, pixel_height).await;
+                        }
                     }
                 }
-                Ok(Some(ChannelMsg::ExtendedData { data, .. })) => {
-                    if output_tx.send(data.to_vec()).await.is_err() {
-                        break;
+                message = channel.wait() => {
+                    match message {
+                        Some(ChannelMsg::Data(data)) => {
+                            let _ = output_tx.send(data.to_vec());
+                        }
+                        Some(ChannelMsg::ExtendedData(_, data)) => {
+                            let _ = output_tx.send(data.to_vec());
+                        }
+                        Some(ChannelMsg::Eof) | None => break,
+                        _ => {}
                     }
                 }
-                Ok(Some(ChannelMsg::Eof)) | Ok(Some(ChannelMsg::Close)) | Ok(None) => break,
-                Ok(Some(_)) | Err(_) => {}
-            }
-
-            while let Ok(command) = command_rx.try_recv() {
-                let result = match command {
-                    PtyCommand::Input(data) => channel.data_bytes(data).await,
-                    PtyCommand::Resize {
-                        cols,
-                        rows,
-                        pixel_width,
-                        pixel_height,
-                    } => channel
-                        .window_change(
-                            u32::from(cols),
-                            u32::from(rows),
-                            u32::from(pixel_width),
-                            u32::from(pixel_height),
-                        )
-                        .await,
-                };
-
-                if result.is_err() {
-                    let _ = output_tx.send(b"\r\n[NAGX] PTY transport error\r\n".to_vec()).await;
-                    break;
-                }
-            }
-
-            if command_rx.is_closed() {
-                break;
             }
         }
-
-        let _ = handle
-            .disconnect(Disconnect::ByApplication, "NAGX session closed", "English")
-            .await;
     });
 
-    Ok((PtySession { commands: command_tx }, output_rx))
+    Ok((PtySession { tx }, output_rx))
 }
