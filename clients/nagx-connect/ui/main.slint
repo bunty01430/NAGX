@@ -13,6 +13,10 @@ export component MainWindow inherits Window {
     property <int> active-workspace: 0;
     property <int> active-terminal: 1;
 
+    property <int> auth-mode: 0;
+    property <string> key-path: "";
+    property <string> key-passphrase: "";
+
     property <string> terminal-1-state: "OFFLINE";
     property <string> terminal-2-state: "OFFLINE";
     property <string> terminal-3-state: "OFFLINE";
@@ -62,12 +66,14 @@ export component MainWindow inherits Window {
     property <bool> resizing-logs: false;
 
     callback connect-slot(int, string, string, string);
+    callback browse-key();
     callback select-terminal(int);
     callback terminal-key(int, string, bool, bool, bool);
     callback terminal-resize(int, int, int, int, int);
     callback terminal-mouse(int, int, int, int, int, bool, bool, bool);
     callback terminal-wheel(int, int);
     callback terminal-paste(int);
+
     function focus-terminal() { terminal-input.focus(); }
     pure function length-to-int(value: length) -> int { return value / 1px; }
     function clamp-int(value: int, minimum: int, maximum: int) -> int { return min(max(value, minimum), maximum); }
@@ -90,6 +96,16 @@ export component MainWindow inherits Window {
         root.select-terminal(slot);
         terminal-input.focus();
     }
+    function connect-active-slot() {
+        root.connect-slot(
+            root.active-terminal,
+            host-input.text,
+            user-input.text,
+            root.auth-mode == 0
+                ? password-input.text
+                : "NAGXKEY:" + root.key-path + "\n" + root.key-passphrase
+        );
+    }
 
     VerticalBox {
         spacing: 0px;
@@ -111,7 +127,7 @@ export component MainWindow inherits Window {
                 Button { text: "Monitoring"; clicked => { root.active-workspace = 2; } }
                 Button { text: "Operations"; clicked => { root.active-workspace = 3; } }
                 Rectangle { horizontal-stretch: 1; }
-                Text { text: "Alt+1..4 workspaces · Alt+Tab terminal slots"; color: #5b6978; font-size: 10px; vertical-alignment: center; }
+                Text { text: "Alt+1..4 workspaces · Alt+1..3 terminals"; color: #5b6978; font-size: 10px; vertical-alignment: center; }
             }
         }
 
@@ -124,9 +140,25 @@ export component MainWindow inherits Window {
                     Text { text: "CONNECTION"; color: #718096; font-size: 10px; }
                     LineEdit { id: host-input; placeholder-text: "host or IP"; }
                     LineEdit { id: user-input; placeholder-text: "username"; }
-                    LineEdit { id: password-input; placeholder-text: "password"; input-type: password; }
-                    Button { text: "CONNECT ACTIVE SLOT"; clicked => { root.connect-slot(root.active-terminal, host-input.text, user-input.text, password-input.text); } }
-                    Text { text: "Each slot has its own SSH session."; color: #4f5d6b; font-size: 10px; }
+
+                    HorizontalBox { spacing: 6px;
+                        Button { text: "PASSWORD"; clicked => { root.auth-mode = 0; } }
+                        Button { text: "PEM / PPK"; clicked => { root.auth-mode = 1; } }
+                    }
+
+                    if (root.auth-mode == 0) : LineEdit { id: password-input; placeholder-text: "SSH password"; input-type: password; }
+
+                    if (root.auth-mode == 1) : VerticalBox {
+                        spacing: 6px;
+                        HorizontalBox { spacing: 5px;
+                            LineEdit { id: key-input; text: root.key-path; placeholder-text: "private key (.pem / .ppk)"; read-only: true; }
+                            Button { text: "BROWSE"; clicked => { root.browse-key(); } }
+                        }
+                        LineEdit { id: key-passphrase-input; text: root.key-passphrase; placeholder-text: "key passphrase (optional)"; input-type: password; changed text => { root.key-passphrase = self.text; } }
+                    }
+
+                    Button { text: "CONNECT ACTIVE SLOT"; clicked => { root.connect-active-slot(); } }
+                    Text { text: root.auth-mode == 0 ? "SSH password authentication" : "SSH private key authentication · PEM / PPK"; color: #4f5d6b; font-size: 10px; }
                     Rectangle { vertical-stretch: 1; }
                     Text { text: "TERMINAL SESSIONS"; color: #718096; font-size: 10px; }
                     Button { text: "Terminal 1  ·  " + root.terminal-1-state; clicked => { root.select-terminal-ui(1); } }
