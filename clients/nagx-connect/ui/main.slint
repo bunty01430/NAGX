@@ -35,34 +35,18 @@ export component MainWindow inherits Window {
                 padding-right: 18px;
                 alignment: center;
                 spacing: 16px;
-
-                Text {
-                    text: "NAGX";
-                    color: #64ffda;
-                    font-size: 24px;
-                    font-weight: 700;
-                }
-                Text {
-                    text: "CONNECT";
-                    color: #718096;
-                    font-size: 12px;
-                }
+                Text { text: "NAGX"; color: #64ffda; font-size: 24px; font-weight: 700; }
+                Text { text: "CONNECT"; color: #718096; font-size: 12px; }
                 Rectangle { horizontal-stretch: 1; }
-                Text {
-                    text: root.status-text;
-                    color: #64ffda;
-                    font-size: 12px;
-                }
+                Text { text: root.status-text; color: #64ffda; font-size: 12px; }
             }
         }
 
         HorizontalBox {
             spacing: 0px;
-
             Rectangle {
                 width: 280px;
                 background: #0a0e14;
-
                 VerticalBox {
                     padding: 18px;
                     spacing: 12px;
@@ -70,10 +54,7 @@ export component MainWindow inherits Window {
                     LineEdit { id: host-input; placeholder-text: "host or IP"; }
                     LineEdit { id: user-input; placeholder-text: "username"; }
                     LineEdit { id: password-input; placeholder-text: "password"; input-type: password; }
-                    Button {
-                        text: "CONNECT";
-                        clicked => { root.connect(host-input.text, user-input.text, password-input.text); }
-                    }
+                    Button { text: "CONNECT"; clicked => { root.connect(host-input.text, user-input.text, password-input.text); } }
                     Rectangle { vertical-stretch: 1; }
                     Text { text: "SESSION"; color: #718096; font-size: 11px; }
                     Text { text: root.server-text; color: #d7dee8; font-size: 13px; }
@@ -83,11 +64,9 @@ export component MainWindow inherits Window {
             Rectangle {
                 horizontal-stretch: 1;
                 background: #06090d;
-
                 VerticalBox {
                     padding: 18px;
                     spacing: 12px;
-
                     HorizontalBox {
                         height: 26px;
                         spacing: 12px;
@@ -104,16 +83,16 @@ export component MainWindow inherits Window {
 
                         changed width => {
                             root.terminal-resize(
-                                max(1, root.length-to-int((terminal-frame.width - 20px) / 8.45px)),
-                                max(1, root.length-to-int((terminal-frame.height - 16px) / 17px)),
+                                max(1, (terminal-frame.width - 20px) / 8.45px),
+                                max(1, (terminal-frame.height - 16px) / 17px),
                                 root.length-to-int(terminal-frame.width),
                                 root.length-to-int(terminal-frame.height)
                             );
                         }
                         changed height => {
                             root.terminal-resize(
-                                max(1, root.length-to-int((terminal-frame.width - 20px) / 8.45px)),
-                                max(1, root.length-to-int((terminal-frame.height - 16px) / 17px)),
+                                max(1, (terminal-frame.width - 20px) / 8.45px),
+                                max(1, (terminal-frame.height - 16px) / 17px),
                                 root.length-to-int(terminal-frame.width),
                                 root.length-to-int(terminal-frame.height)
                             );
@@ -156,7 +135,6 @@ export component MainWindow inherits Window {
                                 visible: root.mouse-reporting;
                                 enabled: root.mouse-reporting;
                                 mouse-cursor: root.mouse-reporting ? "default" : "text";
-
                                 pointer-event(event) => {
                                     let button = event.button == PointerEventButton.left ? 1
                                         : event.button == PointerEventButton.middle ? 2
@@ -169,16 +147,15 @@ export component MainWindow inherits Window {
                                     root.terminal-mouse(
                                         button,
                                         kind,
-                                        root.length-to-int(self.mouse-x / 8.45px) + 1,
-                                        root.length-to-int(self.mouse-y / 17px) + 1,
+                                        self.mouse-x / 8.45px + 1,
+                                        self.mouse-y / 17px + 1,
                                         event.modifiers.shift,
                                         event.modifiers.alt,
                                         event.modifiers.control
                                     );
                                 }
-
                                 scroll-event(event) => {
-                                    root.terminal-wheel(root.length-to-int(event.delta-y));
+                                    root.terminal-wheel(event.delta-y / 1px);
                                     accept
                                 }
                             }
