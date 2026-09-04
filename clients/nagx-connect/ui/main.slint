@@ -1,4 +1,4 @@
-import { VerticalBox, HorizontalBox, Button, LineEdit } from "std-widgets.slint";
+import { VerticalBox, HorizontalBox, Button, LineEdit, TextEdit } from "std-widgets.slint";
 
 export component MainWindow inherits Window {
     title: "NAGX Connect";
@@ -10,7 +10,11 @@ export component MainWindow inherits Window {
 
     property <string> status-text: "DISCONNECTED";
     property <string> server-text: "No server connected";
+    property <string> terminal-text: "NAGX terminal offline.";
+
     callback connect(string, string, string);
+    callback terminal-key(string, bool, bool);
+    function focus-terminal() { terminal-output.focus(); }
 
     VerticalBox {
         spacing: 0px;
@@ -108,25 +112,45 @@ export component MainWindow inherits Window {
                     padding: 18px;
                     spacing: 12px;
 
-                    Text {
-                        text: "NAGX WORKSPACE";
-                        color: #d7dee8;
-                        font-size: 16px;
-                        font-weight: 700;
+                    HorizontalBox {
+                        height: 26px;
+                        spacing: 12px;
+
+                        Text {
+                            text: "NAGX TERMINAL";
+                            color: #d7dee8;
+                            font-size: 16px;
+                            font-weight: 700;
+                        }
+
+                        Rectangle { horizontal-stretch: 1; }
+
+                        Text {
+                            text: "PTY / xterm-256color";
+                            color: #718096;
+                            font-size: 11px;
+                        }
                     }
 
                     Rectangle {
                         vertical-stretch: 1;
-                        background: #030508;
+                        background: #020407;
                         border-width: 1px;
                         border-color: #18212c;
 
-                        Text {
-                            text: "SSH transport: ACTIVE\n\nThis stage establishes a real authenticated\nSSH connection to the Linux server.\n\nNext: real PTY shell, terminal rendering,\nresize/signals, and session recovery.";
-                            color: #9aa7b6;
+                        terminal-output := TextEdit {
+                            width: parent.width;
+                            height: parent.height;
+                            text: root.terminal-text;
+                            read-only: true;
+                            wrap: no-wrap;
+                            font-family: "Consolas";
                             font-size: 14px;
-                            x: 22px;
-                            y: 22px;
+                            color: #d7dee8;
+                            key-pressed(event) => {
+                                root.terminal-key(event.text, event.modifiers.control, event.modifiers.alt);
+                                accept
+                            }
                         }
                     }
                 }
