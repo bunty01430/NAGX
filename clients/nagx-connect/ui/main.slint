@@ -53,6 +53,16 @@ export component MainWindow inherits Window {
     function focus-terminal() { terminal-input.focus(); }
     pure function length-to-int(value: length) -> int { return value / 1px; }
     function clamp-int(value: int, minimum: int, maximum: int) -> int { return min(max(value, minimum), maximum); }
+    function focus-terminal-window() {
+        root.terminal-focused = true;
+        root.logs-focused = false;
+        root.terminal-minimized = false;
+        terminal-input.focus();
+    }
+    function focus-logs-window() {
+        root.logs-focused = true;
+        root.terminal-focused = false;
+    }
 
     VerticalBox {
         spacing: 0px;
@@ -74,7 +84,7 @@ export component MainWindow inherits Window {
                 Button { text: "Monitoring"; clicked => { root.active-workspace = 2; } }
                 Button { text: "Operations"; clicked => { root.active-workspace = 3; } }
                 Rectangle { horizontal-stretch: 1; }
-                Text { text: "/  Command Palette"; color: #5b6978; font-size: 11px; vertical-alignment: center; }
+                Text { text: "Alt+1..4 workspaces · Alt+Tab windows"; color: #5b6978; font-size: 10px; vertical-alignment: center; }
             }
         }
 
@@ -91,10 +101,10 @@ export component MainWindow inherits Window {
                     Button { text: "CONNECT"; clicked => { root.connect(host-input.text, user-input.text, password-input.text); } }
                     Rectangle { vertical-stretch: 1; }
                     Text { text: "WINDOWS"; color: #718096; font-size: 10px; }
-                    Button { text: "Terminal"; clicked => { root.terminal-minimized = false; root.terminal-focused = true; root.logs-focused = false; } }
-                    Button { text: "System Overview"; clicked => { root.terminal-focused = true; root.logs-focused = false; } }
-                    Button { text: "Logs"; clicked => { root.logs-open = true; root.logs-focused = true; root.terminal-focused = false; } }
-                    Button { text: "Monitoring"; clicked => { root.active-workspace = 2; root.logs-open = true; root.logs-focused = true; root.terminal-focused = false; } }
+                    Button { text: "Terminal"; clicked => { root.focus-terminal-window(); } }
+                    Button { text: "System Overview"; clicked => { root.active-workspace = 0; root.focus-terminal-window(); } }
+                    Button { text: "Logs"; clicked => { root.logs-open = true; root.focus-logs-window(); } }
+                    Button { text: "Monitoring"; clicked => { root.active-workspace = 2; root.logs-open = true; root.focus-logs-window(); } }
                     Button { text: "Operations"; clicked => { root.active-workspace = 3; } }
                     Rectangle { height: 1px; background: #17202a; }
                     Text { text: root.active-workspace == 0 ? "WORKSPACE 1 · OVERVIEW" : root.active-workspace == 1 ? "WORKSPACE 2 · DEVELOPMENT" : root.active-workspace == 2 ? "WORKSPACE 3 · MONITORING" : "WORKSPACE 4 · OPERATIONS"; color: #64ffda; font-size: 10px; }
@@ -121,17 +131,19 @@ export component MainWindow inherits Window {
                 y: root.terminal-maximized ? 150px : root.terminal-y;
                 width: root.terminal-maximized ? parent.width - 296px : root.terminal-width;
                 height: root.terminal-maximized ? parent.height - 188px : root.terminal-height;
+                z: root.terminal-focused ? 20 : 10;
                 background: #020407; border-width: 1px; border-color: root.terminal-focused ? #31546a : #18212c;
 
                 TouchArea { x: 0px; y: 0px; width: parent.width - 80px; height: 28px; mouse-cursor: "default";
                     pointer-event(event) => {
                         if (event.kind == PointerEventKind.down) {
-                            root.terminal-focused = true; root.logs-focused = false; root.dragging-terminal = true;
+                            root.focus-terminal-window();
+                            root.dragging-terminal = true;
                             root.drag-start-x = self.mouse-x; root.drag-start-y = self.mouse-y;
                             root.drag-origin-x = root.terminal-x; root.drag-origin-y = root.terminal-y;
                         } else if (event.kind == PointerEventKind.move && root.dragging-terminal && !root.terminal-maximized) {
-                            root.terminal-x = root.clamp-int(root.drag-origin-x + self.mouse-x - root.drag-start-x, 284, 1200);
-                            root.terminal-y = root.clamp-int(root.drag-origin-y + self.mouse-y - root.drag-start-y, 0, 650);
+                            root.terminal-x = root.clamp-int(root.drag-origin-x + self.mouse-x - root.drag-start-x, 284, max(284, 1500 - root.terminal-width));
+                            root.terminal-y = root.clamp-int(root.drag-origin-y + self.mouse-y - root.drag-start-y, 0, max(0, 780 - root.terminal-height));
                         } else if (event.kind == PointerEventKind.up) { root.dragging-terminal = false; }
                     }
                 }
@@ -141,6 +153,7 @@ export component MainWindow inherits Window {
                     Rectangle { horizontal-stretch: 1; }
                     Button { text: "—"; clicked => { root.terminal-minimized = true; } }
                     Button { text: root.terminal-maximized ? "❐" : "□"; clicked => { root.terminal-maximized = !root.terminal-maximized; } }
+                    Button { text: "×"; clicked => { root.terminal-minimized = true; } }
                 }
 
                 ContextMenuArea { y: 28px; width: parent.width; height: parent.height - 28px;
@@ -159,6 +172,13 @@ export component MainWindow inherits Window {
                             StyledText { width: parent.width; height: parent.height; text: root.terminal-styled; font-family: "Cascadia Mono"; font-size: 14px; }
                             terminal-input := TextEdit { width: parent.width; height: parent.height; text: root.terminal-plain; read-only: true; color: transparent; selection-foreground-color: #d7dee8; selection-background-color: #233142; background: transparent; cursor-width: 0px;
                                 key-pressed(event) => {
+                                    if (event.modifiers.alt) {
+                                        if (event.text == "1") { root.active-workspace = 0; accept; }
+                                        if (event.text == "2") { root.active-workspace = 1; accept; }
+                                        if (event.text == "3") { root.active-workspace = 2; accept; }
+                                        if (event.text == "4") { root.active-workspace = 3; accept; }
+                                        if (event.text == "Tab") { root.focus-logs-window(); accept; }
+                                    }
                                     if (event.modifiers.control && event.modifiers.shift) {
                                         if (event.text == "c" || event.text == "C") { terminal-input.copy(); accept; }
                                         if (event.text == "v" || event.text == "V") { root.terminal-paste(); accept; }
@@ -181,6 +201,7 @@ export component MainWindow inherits Window {
                         if (event.kind == PointerEventKind.down) {
                             root.resizing-terminal = true; root.resize-origin-width = root.terminal-width; root.resize-origin-height = root.terminal-height;
                             root.drag-start-x = self.mouse-x; root.drag-start-y = self.mouse-y;
+                            root.focus-terminal-window();
                         } else if (event.kind == PointerEventKind.move && root.resizing-terminal && !root.terminal-maximized) {
                             root.terminal-width = root.clamp-int(root.resize-origin-width + self.mouse-x - root.drag-start-x, 480, 1400);
                             root.terminal-height = root.clamp-int(root.resize-origin-height + self.mouse-y - root.drag-start-y, 240, 760);
@@ -189,29 +210,35 @@ export component MainWindow inherits Window {
                 }
             }
 
-            if (root.terminal-minimized) : Rectangle { x: root.terminal-x; y: root.terminal-y; width: 280px; height: 28px; background: #0b1118; border-width: 1px; border-color: #18212c;
-                HorizontalBox { Text { text: "NAGX TERMINAL (minimized)"; color: #718096; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Button { text: "Restore"; clicked => { root.terminal-minimized = false; root.terminal-focused = true; } } }
+            if (root.terminal-minimized) : Rectangle { x: root.terminal-x; y: root.terminal-y; width: 280px; height: 28px; z: 20;
+                background: #0b1118; border-width: 1px; border-color: #18212c;
+                TouchArea { width: parent.width - 68px; height: parent.height;
+                    pointer-event(event) => { if (event.kind == PointerEventKind.down) { root.focus-terminal-window(); } }
+                }
+                HorizontalBox { Text { text: "NAGX TERMINAL (minimized)"; color: #718096; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Button { text: "Restore"; clicked => { root.focus-terminal-window(); } } }
             }
 
             if (root.logs-open) : Rectangle {
                 x: root.logs-x; y: root.logs-y; width: root.logs-width; height: root.logs-height;
+                z: root.logs-focused ? 20 : 10;
                 background: #05080c; border-width: 1px; border-color: root.logs-focused ? #31546a : #18212c;
                 TouchArea { x: 0px; y: 0px; width: parent.width - 36px; height: 28px; mouse-cursor: "default";
                     pointer-event(event) => {
                         if (event.kind == PointerEventKind.down) {
-                            root.logs-focused = true; root.terminal-focused = false; root.dragging-logs = true;
+                            root.focus-logs-window();
+                            root.dragging-logs = true;
                             root.drag-start-x = self.mouse-x; root.drag-start-y = self.mouse-y;
                             root.drag-origin-x = root.logs-x; root.drag-origin-y = root.logs-y;
                         } else if (event.kind == PointerEventKind.move && root.dragging-logs) {
-                            root.logs-x = root.clamp-int(root.drag-origin-x + self.mouse-x - root.drag-start-x, 284, 1200);
-                            root.logs-y = root.clamp-int(root.drag-origin-y + self.mouse-y - root.drag-start-y, 0, 650);
+                            root.logs-x = root.clamp-int(root.drag-origin-x + self.mouse-x - root.drag-start-x, 284, max(284, 1500 - root.logs-width));
+                            root.logs-y = root.clamp-int(root.drag-origin-y + self.mouse-y - root.drag-start-y, 0, max(0, 780 - root.logs-height));
                         } else if (event.kind == PointerEventKind.up) { root.dragging-logs = false; }
                     }
                 }
                 HorizontalBox { height: 28px; background: root.logs-focused ? #0f1820 : #0b1118;
                     Text { text: "  NAGX LOGS"; color: #d7dee8; font-size: 12px; vertical-alignment: center; }
                     Rectangle { horizontal-stretch: 1; }
-                    Button { text: "×"; clicked => { root.logs-open = false; } }
+                    Button { text: "×"; clicked => { root.logs-open = false; root.logs-focused = false; root.terminal-focused = true; } }
                 }
                 Text { text: "[system]\n[ssh] connection events\n[pty] terminal output\n[services] waiting for telemetry\n\nLogs window is managed by the NAGX window manager."; color: #9aa7b6; font-family: "Cascadia Mono"; font-size: 12px; x: 14px; y: 40px; }
                 TouchArea { x: parent.width - 16px; y: parent.height - 16px; width: 16px; height: 16px; mouse-cursor: "size-horizontal";
@@ -219,6 +246,7 @@ export component MainWindow inherits Window {
                         if (event.kind == PointerEventKind.down) {
                             root.resizing-logs = true; root.resize-origin-width = root.logs-width; root.resize-origin-height = root.logs-height;
                             root.drag-start-x = self.mouse-x; root.drag-start-y = self.mouse-y;
+                            root.focus-logs-window();
                         } else if (event.kind == PointerEventKind.move && root.resizing-logs) {
                             root.logs-width = root.clamp-int(root.resize-origin-width + self.mouse-x - root.drag-start-x, 360, 1200);
                             root.logs-height = root.clamp-int(root.resize-origin-height + self.mouse-y - root.drag-start-y, 220, 700);
@@ -230,8 +258,8 @@ export component MainWindow inherits Window {
 
         Rectangle { height: 38px; background: #0a0f15;
             HorizontalBox { padding-left: 10px; padding-right: 10px; spacing: 8px;
-                Button { text: "Terminal"; clicked => { root.terminal-minimized = false; root.terminal-focused = true; root.logs-focused = false; } }
-                Button { text: "Logs"; clicked => { root.logs-open = true; root.logs-focused = true; root.terminal-focused = false; } }
+                Button { text: "Terminal"; clicked => { root.focus-terminal-window(); } }
+                Button { text: "Logs"; clicked => { root.logs-open = true; root.focus-logs-window(); } }
                 Rectangle { horizontal-stretch: 1; }
                 Text { text: "NAGX / native client"; color: #4f5d6b; font-size: 10px; vertical-alignment: center; }
             }
