@@ -122,17 +122,15 @@ fn apply_active_terminal_snapshot(window: &MainWindow, terminals: &TerminalSlots
     window.set_mouse_reporting(mouse_reporting);
 }
 
-fn paste_from_clipboard(terminal: &TerminalSlots, ptys: &PtySlots, slot: usize) -> Result<(), String> {
+fn paste_from_clipboard(terminals: &TerminalSlots, ptys: &PtySlots, slot: usize) -> Result<(), String> {
     let mut clipboard = Clipboard::new().map_err(|err| format!("Clipboard unavailable: {err}"))?;
     let text = clipboard.get_text().map_err(|err| format!("Clipboard read failed: {err}"))?;
     if text.is_empty() || slot >= TERMINAL_SLOTS { return Ok(()); }
 
-    let bracketed = terminal_snapshot(terminal, slot)?.4;
-    let bracketed = if bracketed {
-        true
-    } else {
-        terminal.lock().map_err(|_| "terminal mutex poisoned".to_string())?[slot].bracketed_paste_enabled()
-    };
+    let bracketed = terminals
+        .lock()
+        .map_err(|_| "terminal mutex poisoned".to_string())?[slot]
+        .bracketed_paste_enabled();
 
     let data = if bracketed {
         let mut wrapped = Vec::with_capacity(text.len() + 12);
@@ -191,7 +189,7 @@ fn spawn_terminal_connection(
                                 _ => {}
                             }
                             if slot == (window.get_active_terminal() as usize).saturating_sub(1) {
-                                window.set_cursor_visible(true);
+                                apply_active_terminal_snapshot(&window, &terminals, slot);
                                 window.invoke_focus_terminal();
                             }
                         }
@@ -243,7 +241,6 @@ fn spawn_terminal_connection(
                                         _ => {}
                                     }
                                     if slot == (window.get_active_terminal() as usize).saturating_sub(1) {
-                                        window.set_server_text(format!("T{} · active", slot + 1).into());
                                         window.set_cursor_x(i32::from(cursor_x));
                                         window.set_cursor_y(i32::from(cursor_y));
                                         window.set_cursor_visible(cursor_visible);
@@ -329,10 +326,15 @@ fn main() -> Result<(), slint::PlatformError> {
         window.invoke_focus_terminal();
     });
 
+    let weak_for_select = window.as_weak();
     let terminals_for_select = Arc::clone(&terminals);
     window.on_select_terminal(move |slot| {
         let slot = (slot.clamp(1, 3) - 1) as usize;
-        apply_active_terminal_snapshot(&window, &terminals_for_select, slot);
+        if let Some(window) = weak_for_select.upgrade() {
+            apply_active_terminal_snapshot(&window, &terminals_for_select, slot);
+            window.set_status_text(format!("T{} SELECTED", slot + 1).into());
+            window.set_server_text(format!("T{} · active", slot + 1).into());
+        }
     });
 
     let ptys_for_keyboard = Arc::clone(&ptys);
