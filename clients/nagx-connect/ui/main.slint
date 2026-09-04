@@ -7,6 +7,7 @@ export component MainWindow inherits Window {
     background: #06090d;
     default-font-family: "Cascadia Mono";
     default-font-size: 13px;
+    forward-focus: terminal-input;
 
     in-out property <string> status-text: "DISCONNECTED";
     in-out property <string> server-text: "No server connected";
@@ -97,7 +98,7 @@ export component MainWindow inherits Window {
                 VerticalBox { padding: 14px; spacing: 8px;
                     Text { text: "CONNECTION"; color: #718096; font-size: 10px; }
                     host-input := LineEdit { placeholder-text: "host or IP"; }
-                    user-input := LineEdit { placeholder-text: "username"; }
+                    user-input := LineEdit { placeholder-text: "username (optional with PEM / PPK)"; }
                     password-input := LineEdit { placeholder-text: "SSH password"; input-type: password; visible: root.auth-mode == 0; }
                     HorizontalBox { spacing: 4px;
                         Button { text: "PASSWORD"; clicked => { root.auth-mode = 0; } }
@@ -109,11 +110,11 @@ export component MainWindow inherits Window {
                                 LineEdit { text: root.key-path; placeholder-text: "private key"; read-only: true; horizontal-stretch: 1; }
                                 Button { text: "BROWSE"; clicked => { root.browse-key(); } }
                             }
-                            LineEdit { text: root.key-passphrase; placeholder-text: "key passphrase"; input-type: password; edited(text) => { root.key-passphrase = text; } }
+                            LineEdit { text: root.key-passphrase; placeholder-text: "key passphrase (optional)"; input-type: password; edited(text) => { root.key-passphrase = text; } }
                         }
                     }
-                    Button { text: "CONNECT T" + root.active-terminal; clicked => { root.connect-slot(root.active-terminal, host-input.text, user-input.text, root.auth-mode == 0 ? password-input.text : "NAGXKEY:" + root.key-path + "\n" + root.key-passphrase); } }
-                    Text { text: "SSH password or private key"; color: #4f5d6b; font-size: 10px; }
+                    Button { text: root.auth-mode == 0 ? "CONNECT PASSWORD" : "CONNECT KEY"; clicked => { root.connect-slot(root.active-terminal, host-input.text, user-input.text, root.auth-mode == 0 ? password-input.text : "NAGXKEY:" + root.key-path + "\n" + root.key-passphrase); } }
+                    Text { text: root.auth-mode == 0 ? "Host + username + password" : "Host + key. Username/password optional."; color: #4f5d6b; font-size: 10px; wrap: word-wrap; }
                     Rectangle { vertical-stretch: 1; }
                     Text { text: "TERMINALS"; color: #718096; font-size: 10px; }
                     Button { text: "T1  " + root.terminal-1-state; clicked => { root.select-terminal-ui(1); } }
@@ -153,17 +154,18 @@ export component MainWindow inherits Window {
                             opacity: 0%;
                             key-pressed(event) => {
                                 if event.modifiers.alt {
-                                    if event.text == "1" { root.select-terminal-ui(1); accept; }
-                                    if event.text == "2" { root.select-terminal-ui(2); accept; }
-                                    if event.text == "3" { root.select-terminal-ui(3); accept; }
-                                    if event.text == "Tab" { root.select-terminal-ui(root.active-terminal == 3 ? 1 : root.active-terminal + 1); accept; }
+                                    if event.text == "1" { root.select-terminal-ui(1); return accept; }
+                                    if event.text == "2" { root.select-terminal-ui(2); return accept; }
+                                    if event.text == "3" { root.select-terminal-ui(3); return accept; }
+                                    if event.text == "Tab" { root.select-terminal-ui(root.active-terminal == 3 ? 1 : root.active-terminal + 1); return accept; }
                                 }
                                 if event.modifiers.control && event.modifiers.shift {
-                                    if event.text == "v" || event.text == "V" { root.terminal-paste(root.active-terminal); accept; }
-                                    if event.text == "a" || event.text == "A" { terminal-input.select-all(); accept; }
-                                    if event.text == "c" || event.text == "C" { terminal-input.copy(); accept; }
+                                    if event.text == "v" || event.text == "V" { root.terminal-paste(root.active-terminal); return accept; }
+                                    if event.text == "a" || event.text == "A" { terminal-input.select-all(); return accept; }
+                                    if event.text == "c" || event.text == "C" { terminal-input.copy(); return accept; }
                                 }
-                                root.terminal-key(root.active-terminal, event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift); accept;
+                                root.terminal-key(root.active-terminal, event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift);
+                                return accept;
                             }
                         }
                         TouchArea {
@@ -188,11 +190,15 @@ export component MainWindow inherits Window {
             }
             if root.logs-open : Rectangle { x: root.logs-x * 1px; y: root.logs-y * 1px; width: root.logs-width * 1px; height: root.logs-height * 1px; z: 10; background: #05080c; border-width: 1px; border-color: root.logs-focused ? #31546a : #18212c;
                 Rectangle { width: parent.width; height: 28px; background: root.logs-focused ? #0f1820 : #0b1118;
-                    Text { x: 10px; text: "NAGX LOGS"; color: #d7dee8; font-size: 12px; vertical-alignment: center; }
+                    Text { x: 10px; text: "NAGX LOGS · T" + root.active-terminal; color: #d7dee8; font-size: 12px; vertical-alignment: center; }
                     Button { x: parent.width - 36px; width: 36px; height: 28px; text: "×"; clicked => { root.logs-open = false; root.logs-focused = false; root.terminal-focused = true; root.focus-terminal(); } }
                 }
-                Text { x: 14px; y: 42px; text: "Event stream · system · services · security"; color: #8c98a6; font-size: 11px; }
-                Text { x: 14px; y: 72px; text: "[NAGX] waiting for server events…"; color: #4f5d6b; font-size: 11px; }
+                TextEdit {
+                    x: 14px; y: 42px; width: parent.width - 28px; height: parent.height - 56px;
+                    text: root.active-terminal == 1 ? root.terminal-1-plain : root.active-terminal == 2 ? root.terminal-2-plain : root.terminal-3-plain;
+                    read-only: true;
+                    wrap: no-wrap;
+                }
             }
         }
         Rectangle { height: 28px; background: #0a0f15;
