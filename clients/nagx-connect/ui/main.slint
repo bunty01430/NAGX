@@ -1,0 +1,122 @@
+import { VerticalBox, HorizontalBox, Button, LineEdit } from "std-widgets.slint";
+
+export component MainWindow inherits Window {
+    title: "NAGX Connect";
+    width: 1360px;
+    height: 820px;
+    min-width: 960px;
+    min-height: 600px;
+    background: #080b10;
+
+    property <string> status-text: "DISCONNECTED";
+    property <string> server-text: "No server connected";
+
+    VerticalBox {
+        spacing: 0px;
+
+        Rectangle {
+            height: 54px;
+            background: #0d1219;
+            HorizontalBox {
+                padding-left: 18px;
+                padding-right: 18px;
+                alignment: center;
+                spacing: 16px;
+
+                Text {
+                    text: "NAGX";
+                    color: #64ffda;
+                    font-size: 24px;
+                    font-weight: 700;
+                }
+
+                Text {
+                    text: "CONNECT";
+                    color: #718096;
+                    font-size: 12px;
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                Text {
+                    text: root.status-text;
+                    color: #64ffda;
+                    font-size: 12px;
+                }
+            }
+        }
+
+        HorizontalBox {
+            spacing: 0px;
+
+            Rectangle {
+                width: 250px;
+                background: #0a0e14;
+
+                VerticalBox {
+                    padding: 18px;
+                    spacing: 14px;
+
+                    Text {
+                        text: "CONNECTION";
+                        color: #718096;
+                        font-size: 11px;
+                    }
+
+                    LineEdit {
+                        placeholder-text: "user@host";
+                    }
+
+                    Button {
+                        text: "CONNECT";
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
+
+                    Text {
+                        text: "SESSION";
+                        color: #718096;
+                        font-size: 11px;
+                    }
+                    Text {
+                        text: root.server-text;
+                        color: #d7dee8;
+                        font-size: 13px;
+                    }
+                }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+                background: #06090d;
+
+                VerticalBox {
+                    padding: 18px;
+                    spacing: 12px;
+
+                    Text {
+                        text: "NAGX WORKSPACE";
+                        color: #d7dee8;
+                        font-size: 16px;
+                        font-weight: 700;
+                    }
+
+                    Rectangle {
+                        vertical-stretch: 1;
+                        background: #030508;
+                        border-width: 1px;
+                        border-color: #18212c;
+
+                        Text {
+                            text: "Native terminal workspace\n\nSSH transport: next layer\nReal PTY: next layer\nTelemetry: next layer\n\nThe shell will remain fully native.\nCommands such as git, vim, docker and\nsystemctl will run unchanged on Linux.";
+                            color: #9aa7b6;
+                            font-size: 14px;
+                            x: 22px;
+                            y: 22px;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
