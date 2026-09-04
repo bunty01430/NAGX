@@ -262,8 +262,17 @@ fn main() -> Result<(), slint::PlatformError> {
     let terminals_for_connect = Arc::clone(&terminals);
     window.on_connect_slot(move |slot, host, username, password| {
         let slot = (slot.clamp(1, 3) - 1) as usize;
-        if host.trim().is_empty() || username.trim().is_empty() {
+        let key_mode = password.starts_with("NAGXKEY:");
+        if host.trim().is_empty() || (!key_mode && username.trim().is_empty()) {
             if let Some(window) = weak_for_connect.upgrade() { window.set_status_text("INVALID CONNECTION".into()); }
+            return;
+        }
+        if key_mode && password[8..].trim().is_empty() {
+            if let Some(window) = weak_for_connect.upgrade() { window.set_status_text("PRIVATE KEY REQUIRED".into()); }
+            return;
+        }
+        if !key_mode && password.trim().is_empty() {
+            if let Some(window) = weak_for_connect.upgrade() { window.set_status_text("PASSWORD REQUIRED".into()); }
             return;
         }
         if let Some(window) = weak_for_connect.upgrade() {
