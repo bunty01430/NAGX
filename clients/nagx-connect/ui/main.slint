@@ -1,4 +1,4 @@
-import { VerticalBox, HorizontalBox, Button, LineEdit, TextEdit, ContextMenuArea, Menu, MenuItem, MenuSeparator } from "std-widgets.slint";
+import { VerticalBox, HorizontalBox, Button, LineEdit, TextEdit, ContextMenuArea, Menu, MenuItem, MenuSeparator, TouchArea } from "std-widgets.slint";
 
 export component MainWindow inherits Window {
     title: "NAGX Connect";
@@ -17,11 +17,32 @@ export component MainWindow inherits Window {
     property <bool> cursor-visible: false;
     property <bool> mouse-reporting: false;
     property <int> active-workspace: 0;
+
+    property <int> terminal-x: 292;
+    property <int> terminal-y: 220;
+    property <int> terminal-width: 860;
+    property <int> terminal-height: 520;
     property <bool> terminal-minimized: false;
     property <bool> terminal-maximized: false;
-    property <bool> overview-open: true;
-    property <bool> monitoring-open: false;
-    property <bool> operations-open: false;
+    property <bool> terminal-focused: true;
+
+    property <int> logs-x: 560;
+    property <int> logs-y: 170;
+    property <int> logs-width: 620;
+    property <int> logs-height: 360;
+    property <bool> logs-open: false;
+    property <bool> logs-focused: false;
+
+    property <int> drag-start-x: 0;
+    property <int> drag-start-y: 0;
+    property <int> drag-origin-x: 0;
+    property <int> drag-origin-y: 0;
+    property <int> resize-origin-width: 0;
+    property <int> resize-origin-height: 0;
+    property <bool> dragging-terminal: false;
+    property <bool> dragging-logs: false;
+    property <bool> resizing-terminal: false;
+    property <bool> resizing-logs: false;
 
     callback connect(string, string, string);
     callback terminal-key(string, bool, bool, bool);
@@ -31,14 +52,12 @@ export component MainWindow inherits Window {
     callback terminal-paste();
     function focus-terminal() { terminal-input.focus(); }
     pure function length-to-int(value: length) -> int { return value / 1px; }
+    function clamp-int(value: int, minimum: int, maximum: int) -> int { return min(max(value, minimum), maximum); }
 
     VerticalBox {
         spacing: 0px;
-        Rectangle {
-            height: 48px;
-            background: #0d1219;
-            HorizontalBox {
-                padding-left: 16px; padding-right: 14px; alignment: center; spacing: 14px;
+        Rectangle { height: 48px; background: #0d1219;
+            HorizontalBox { padding-left: 16px; padding-right: 14px; alignment: center; spacing: 14px;
                 Text { text: "NAGX"; color: #64ffda; font-size: 22px; font-weight: 700; }
                 Text { text: "CONNECT"; color: #718096; font-size: 11px; }
                 Rectangle { horizontal-stretch: 1; }
@@ -48,8 +67,7 @@ export component MainWindow inherits Window {
             }
         }
 
-        Rectangle {
-            height: 38px; background: #0a0f15;
+        Rectangle { height: 38px; background: #0a0f15;
             HorizontalBox { padding-left: 12px; spacing: 6px;
                 Button { text: "Overview"; clicked => { root.active-workspace = 0; } }
                 Button { text: "Development"; clicked => { root.active-workspace = 1; } }
@@ -60,12 +78,12 @@ export component MainWindow inherits Window {
             }
         }
 
-        HorizontalBox {
-            spacing: 0px;
-            Rectangle {
-                width: 250px; background: #090d13;
-                VerticalBox {
-                    padding: 16px; spacing: 10px;
+        Rectangle {
+            vertical-stretch: 1;
+            background: #06090d;
+
+            Rectangle { x: 12px; y: 12px; width: 250px; height: parent.height - 24px; background: #090d13;
+                VerticalBox { padding: 16px; spacing: 10px;
                     Text { text: "CONNECTION"; color: #718096; font-size: 10px; }
                     LineEdit { id: host-input; placeholder-text: "host or IP"; }
                     LineEdit { id: user-input; placeholder-text: "username"; }
@@ -73,81 +91,150 @@ export component MainWindow inherits Window {
                     Button { text: "CONNECT"; clicked => { root.connect(host-input.text, user-input.text, password-input.text); } }
                     Rectangle { vertical-stretch: 1; }
                     Text { text: "WINDOWS"; color: #718096; font-size: 10px; }
-                    Button { text: "Terminal"; clicked => { root.terminal-minimized = false; root.terminal-maximized = false; } }
-                    Button { text: "System Overview"; clicked => { root.overview-open = !root.overview-open; } }
-                    Button { text: "Monitoring"; clicked => { root.monitoring-open = !root.monitoring-open; } }
-                    Button { text: "Operations"; clicked => { root.operations-open = !root.operations-open; } }
+                    Button { text: "Terminal"; clicked => { root.terminal-minimized = false; root.terminal-focused = true; root.logs-focused = false; } }
+                    Button { text: "System Overview"; clicked => { root.terminal-focused = true; root.logs-focused = false; } }
+                    Button { text: "Logs"; clicked => { root.logs-open = true; root.logs-focused = true; root.terminal-focused = false; } }
+                    Button { text: "Monitoring"; clicked => { root.active-workspace = 2; root.logs-open = true; root.logs-focused = true; root.terminal-focused = false; } }
+                    Button { text: "Operations"; clicked => { root.active-workspace = 3; } }
                     Rectangle { height: 1px; background: #17202a; }
                     Text { text: root.active-workspace == 0 ? "WORKSPACE 1 · OVERVIEW" : root.active-workspace == 1 ? "WORKSPACE 2 · DEVELOPMENT" : root.active-workspace == 2 ? "WORKSPACE 3 · MONITORING" : "WORKSPACE 4 · OPERATIONS"; color: #64ffda; font-size: 10px; }
                 }
             }
 
-            Rectangle {
-                horizontal-stretch: 1; background: #06090d;
-                VerticalBox { padding: 12px; spacing: 10px;
-                    if (root.active-workspace == 0 && root.overview-open) : Rectangle {
-                        height: 145px; background: #0a1118; border-width: 1px; border-color: #172431;
-                        VerticalBox { padding: 12px; spacing: 8px;
-                            Text { text: "SYSTEM OVERVIEW"; color: #d7dee8; font-size: 14px; font-weight: 700; }
-                            HorizontalBox { spacing: 8px;
-                                Rectangle { horizontal-stretch: 1; background: #0d1720; Text { text: "CPU\n-- %"; color: #64ffda; font-size: 12px; x: 12px; y: 10px; } }
-                                Rectangle { horizontal-stretch: 1; background: #0d1720; Text { text: "RAM\n-- %"; color: #64ffda; font-size: 12px; x: 12px; y: 10px; } }
-                                Rectangle { horizontal-stretch: 1; background: #0d1720; Text { text: "DISK\n-- %"; color: #64ffda; font-size: 12px; x: 12px; y: 10px; } }
-                                Rectangle { horizontal-stretch: 1; background: #0d1720; Text { text: "GPU\n-- %"; color: #64ffda; font-size: 12px; x: 12px; y: 10px; } }
-                            }
-                        }
+            if (root.active-workspace == 0) : Rectangle { x: 284px; y: 12px; width: parent.width - 296px; height: 126px; background: #0a1118; border-width: 1px; border-color: #172431;
+                VerticalBox { padding: 12px; spacing: 8px;
+                    Text { text: "SYSTEM OVERVIEW"; color: #d7dee8; font-size: 14px; font-weight: 700; }
+                    HorizontalBox { spacing: 8px;
+                        Rectangle { horizontal-stretch: 1; background: #0d1720; Text { text: "CPU\n-- %"; color: #64ffda; font-size: 12px; x: 12px; y: 10px; } }
+                        Rectangle { horizontal-stretch: 1; background: #0d1720; Text { text: "RAM\n-- %"; color: #64ffda; font-size: 12px; x: 12px; y: 10px; } }
+                        Rectangle { horizontal-stretch: 1; background: #0d1720; Text { text: "DISK\n-- %"; color: #64ffda; font-size: 12px; x: 12px; y: 10px; } }
+                        Rectangle { horizontal-stretch: 1; background: #0d1720; Text { text: "GPU\n-- %"; color: #64ffda; font-size: 12px; x: 12px; y: 10px; } }
                     }
-                    if (root.active-workspace == 1) : Rectangle { height: 145px; background: #0a1118; border-width: 1px; border-color: #172431; Text { text: "DEVELOPMENT\n\nTerminal · Editor · Files · Git"; color: #9aa7b6; font-size: 13px; x: 14px; y: 14px; } }
-                    if (root.active-workspace == 2 || root.monitoring-open) : Rectangle { height: 110px; background: #0a1118; border-width: 1px; border-color: #172431; Text { text: "MONITORING\n\nCPU · RAM · GPU · NETWORK · PROCESSES · LOGS"; color: #9aa7b6; font-size: 13px; x: 14px; y: 14px; } }
-                    if (root.active-workspace == 3 || root.operations-open) : Rectangle { height: 110px; background: #0a1118; border-width: 1px; border-color: #172431; Text { text: "OPERATIONS\n\nSERVICES · DOCKER · FIREWALL · EVENTS"; color: #9aa7b6; font-size: 13px; x: 14px; y: 14px; } }
+                }
+            }
+            if (root.active-workspace == 1) : Rectangle { x: 284px; y: 12px; width: parent.width - 296px; height: 126px; background: #0a1118; border-width: 1px; border-color: #172431; Text { text: "DEVELOPMENT\n\nTerminal · Editor · Files · Git"; color: #9aa7b6; font-size: 13px; x: 14px; y: 14px; } }
+            if (root.active-workspace == 2) : Rectangle { x: 284px; y: 12px; width: parent.width - 296px; height: 126px; background: #0a1118; border-width: 1px; border-color: #172431; Text { text: "MONITORING\n\nCPU · RAM · GPU · NETWORK · PROCESSES · LOGS"; color: #9aa7b6; font-size: 13px; x: 14px; y: 14px; } }
+            if (root.active-workspace == 3) : Rectangle { x: 284px; y: 12px; width: parent.width - 296px; height: 126px; background: #0a1118; border-width: 1px; border-color: #172431; Text { text: "OPERATIONS\n\nSERVICES · DOCKER · FIREWALL · EVENTS"; color: #9aa7b6; font-size: 13px; x: 14px; y: 14px; } }
 
-                    if (!root.terminal-minimized) : Rectangle {
-                        vertical-stretch: 1; background: #020407; border-width: 1px; border-color: #18212c;
-                        HorizontalBox { height: 28px; background: #0b1118;
-                            Text { text: "  NAGX TERMINAL"; color: #d7dee8; font-size: 12px; vertical-alignment: center; }
-                            Rectangle { horizontal-stretch: 1; }
-                            Button { text: "—"; clicked => { root.terminal-minimized = true; } }
-                            Button { text: "□"; clicked => { root.terminal-maximized = !root.terminal-maximized; } }
-                        }
-                        ContextMenuArea {
-                            y: 28px; vertical-stretch: 1;
-                            Menu {
-                                MenuItem { title: "Copy"; activated => { terminal-input.copy(); } }
-                                MenuItem { title: "Paste"; activated => { root.terminal-paste(); } }
-                                MenuItem { title: "Select All"; activated => { terminal-input.select-all(); } }
-                                MenuSeparator {}
-                                MenuItem { title: "Minimize"; activated => { root.terminal-minimized = true; } }
-                                MenuItem { title: "Maximize"; activated => { root.terminal-maximized = !root.terminal-maximized; } }
-                            }
-                            Rectangle { background: #020407; clip: true;
-                                changed width => { root.terminal-resize(max(1, (terminal-frame.width - 20px) / 8.45px), max(1, (terminal-frame.height - 16px) / 17px), root.length-to-int(terminal-frame.width), root.length-to-int(terminal-frame.height)); }
-                                changed height => { root.terminal-resize(max(1, (terminal-frame.width - 20px) / 8.45px), max(1, (terminal-frame.height - 16px) / 17px), root.length-to-int(terminal-frame.width), root.length-to-int(terminal-frame.height)); }
-                                terminal-frame := Rectangle { x: 10px; y: 8px; width: parent.width - 20px; height: parent.height - 16px; clip: true;
-                                    StyledText { width: parent.width; height: parent.height; text: root.terminal-styled; font-family: "Cascadia Mono"; font-size: 14px; }
-                                    terminal-input := TextEdit { width: parent.width; height: parent.height; text: root.terminal-plain; read-only: true; color: transparent; selection-foreground-color: #d7dee8; selection-background-color: #233142; background: transparent; cursor-width: 0px;
-                                        key-pressed(event) => {
-                                            if (event.modifiers.control && event.modifiers.shift) {
-                                                if (event.text == "c" || event.text == "C") { terminal-input.copy(); accept; }
-                                                if (event.text == "v" || event.text == "V") { root.terminal-paste(); accept; }
-                                                if (event.text == "a" || event.text == "A") { terminal-input.select-all(); accept; }
-                                            }
-                                            root.terminal-key(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift); accept
-                                        }
+            if (!root.terminal-minimized) : Rectangle {
+                x: root.terminal-maximized ? 284px : root.terminal-x;
+                y: root.terminal-maximized ? 150px : root.terminal-y;
+                width: root.terminal-maximized ? parent.width - 296px : root.terminal-width;
+                height: root.terminal-maximized ? parent.height - 188px : root.terminal-height;
+                background: #020407; border-width: 1px; border-color: root.terminal-focused ? #31546a : #18212c;
+
+                TouchArea { x: 0px; y: 0px; width: parent.width - 80px; height: 28px; mouse-cursor: "default";
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down) {
+                            root.terminal-focused = true; root.logs-focused = false; root.dragging-terminal = true;
+                            root.drag-start-x = self.mouse-x; root.drag-start-y = self.mouse-y;
+                            root.drag-origin-x = root.terminal-x; root.drag-origin-y = root.terminal-y;
+                        } else if (event.kind == PointerEventKind.move && root.dragging-terminal && !root.terminal-maximized) {
+                            root.terminal-x = root.clamp-int(root.drag-origin-x + self.mouse-x - root.drag-start-x, 284, 1200);
+                            root.terminal-y = root.clamp-int(root.drag-origin-y + self.mouse-y - root.drag-start-y, 0, 650);
+                        } else if (event.kind == PointerEventKind.up) { root.dragging-terminal = false; }
+                    }
+                }
+
+                HorizontalBox { height: 28px; background: root.terminal-focused ? #0f1820 : #0b1118;
+                    Text { text: "  NAGX TERMINAL"; color: #d7dee8; font-size: 12px; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                    Button { text: "—"; clicked => { root.terminal-minimized = true; } }
+                    Button { text: root.terminal-maximized ? "❐" : "□"; clicked => { root.terminal-maximized = !root.terminal-maximized; } }
+                }
+
+                ContextMenuArea { y: 28px; width: parent.width; height: parent.height - 28px;
+                    Menu {
+                        MenuItem { title: "Copy"; activated => { terminal-input.copy(); } }
+                        MenuItem { title: "Paste"; activated => { root.terminal-paste(); } }
+                        MenuItem { title: "Select All"; activated => { terminal-input.select-all(); } }
+                        MenuSeparator {}
+                        MenuItem { title: "Minimize"; activated => { root.terminal-minimized = true; } }
+                        MenuItem { title: "Maximize"; activated => { root.terminal-maximized = !root.terminal-maximized; } }
+                    }
+                    Rectangle { background: #020407; clip: true;
+                        changed width => { root.terminal-resize(max(1, (terminal-frame.width - 20px) / 8.45px), max(1, (terminal-frame.height - 16px) / 17px), root.length-to-int(terminal-frame.width), root.length-to-int(terminal-frame.height)); }
+                        changed height => { root.terminal-resize(max(1, (terminal-frame.width - 20px) / 8.45px), max(1, (terminal-frame.height - 16px) / 17px), root.length-to-int(terminal-frame.width), root.length-to-int(terminal-frame.height)); }
+                        terminal-frame := Rectangle { x: 10px; y: 8px; width: parent.width - 20px; height: parent.height - 16px; clip: true;
+                            StyledText { width: parent.width; height: parent.height; text: root.terminal-styled; font-family: "Cascadia Mono"; font-size: 14px; }
+                            terminal-input := TextEdit { width: parent.width; height: parent.height; text: root.terminal-plain; read-only: true; color: transparent; selection-foreground-color: #d7dee8; selection-background-color: #233142; background: transparent; cursor-width: 0px;
+                                key-pressed(event) => {
+                                    if (event.modifiers.control && event.modifiers.shift) {
+                                        if (event.text == "c" || event.text == "C") { terminal-input.copy(); accept; }
+                                        if (event.text == "v" || event.text == "V") { root.terminal-paste(); accept; }
+                                        if (event.text == "a" || event.text == "A") { terminal-input.select-all(); accept; }
                                     }
-                                    TouchArea { visible: root.mouse-reporting; enabled: root.mouse-reporting;
-                                        pointer-event(event) => { let button = event.button == PointerEventButton.left ? 1 : event.button == PointerEventButton.middle ? 2 : event.button == PointerEventButton.right ? 3 : 0; let kind = event.kind == PointerEventKind.down ? 1 : event.kind == PointerEventKind.up ? 2 : event.kind == PointerEventKind.move ? 3 : 0; root.terminal-mouse(button, kind, self.mouse-x / 8.45px + 1, self.mouse-y / 17px + 1, event.modifiers.shift, event.modifiers.alt, event.modifiers.control); }
-                                        scroll-event(event) => { root.terminal-wheel(event.delta-y / 1px); accept }
-                                    }
-                                    Rectangle { visible: root.cursor-visible; x: root.cursor-x * 8.45px; y: root.cursor-y * 17px; width: 2px; height: 16px; background: #64ffda; }
+                                    root.terminal-key(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift); accept
                                 }
                             }
+                            TouchArea { visible: root.mouse-reporting; enabled: root.mouse-reporting;
+                                pointer-event(event) => { let button = event.button == PointerEventButton.left ? 1 : event.button == PointerEventButton.middle ? 2 : event.button == PointerEventButton.right ? 3 : 0; let kind = event.kind == PointerEventKind.down ? 1 : event.kind == PointerEventKind.up ? 2 : event.kind == PointerEventKind.move ? 3 : 0; root.terminal-mouse(button, kind, self.mouse-x / 8.45px + 1, self.mouse-y / 17px + 1, event.modifiers.shift, event.modifiers.alt, event.modifiers.control); }
+                                scroll-event(event) => { root.terminal-wheel(event.delta-y / 1px); accept }
+                            }
+                            Rectangle { visible: root.cursor-visible; x: root.cursor-x * 8.45px; y: root.cursor-y * 17px; width: 2px; height: 16px; background: #64ffda; }
                         }
                     }
-                    if (root.terminal-minimized) : Rectangle { height: 28px; background: #0b1118; HorizontalBox { Text { text: "NAGX TERMINAL (minimized)"; color: #718096; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Button { text: "Restore"; clicked => { root.terminal-minimized = false; } } } }
+                }
+
+                TouchArea { x: parent.width - 80px; y: parent.height - 16px; width: 16px; height: 16px; mouse-cursor: "size-horizontal";
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down) {
+                            root.resizing-terminal = true; root.resize-origin-width = root.terminal-width; root.resize-origin-height = root.terminal-height;
+                            root.drag-start-x = self.mouse-x; root.drag-start-y = self.mouse-y;
+                        } else if (event.kind == PointerEventKind.move && root.resizing-terminal && !root.terminal-maximized) {
+                            root.terminal-width = root.clamp-int(root.resize-origin-width + self.mouse-x - root.drag-start-x, 480, 1400);
+                            root.terminal-height = root.clamp-int(root.resize-origin-height + self.mouse-y - root.drag-start-y, 240, 760);
+                        } else if (event.kind == PointerEventKind.up) { root.resizing-terminal = false; }
+                    }
+                }
+            }
+
+            if (root.terminal-minimized) : Rectangle { x: root.terminal-x; y: root.terminal-y; width: 280px; height: 28px; background: #0b1118; border-width: 1px; border-color: #18212c;
+                HorizontalBox { Text { text: "NAGX TERMINAL (minimized)"; color: #718096; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Button { text: "Restore"; clicked => { root.terminal-minimized = false; root.terminal-focused = true; } } }
+            }
+
+            if (root.logs-open) : Rectangle {
+                x: root.logs-x; y: root.logs-y; width: root.logs-width; height: root.logs-height;
+                background: #05080c; border-width: 1px; border-color: root.logs-focused ? #31546a : #18212c;
+                TouchArea { x: 0px; y: 0px; width: parent.width - 36px; height: 28px; mouse-cursor: "default";
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down) {
+                            root.logs-focused = true; root.terminal-focused = false; root.dragging-logs = true;
+                            root.drag-start-x = self.mouse-x; root.drag-start-y = self.mouse-y;
+                            root.drag-origin-x = root.logs-x; root.drag-origin-y = root.logs-y;
+                        } else if (event.kind == PointerEventKind.move && root.dragging-logs) {
+                            root.logs-x = root.clamp-int(root.drag-origin-x + self.mouse-x - root.drag-start-x, 284, 1200);
+                            root.logs-y = root.clamp-int(root.drag-origin-y + self.mouse-y - root.drag-start-y, 0, 650);
+                        } else if (event.kind == PointerEventKind.up) { root.dragging-logs = false; }
+                    }
+                }
+                HorizontalBox { height: 28px; background: root.logs-focused ? #0f1820 : #0b1118;
+                    Text { text: "  NAGX LOGS"; color: #d7dee8; font-size: 12px; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                    Button { text: "×"; clicked => { root.logs-open = false; } }
+                }
+                Text { text: "[system]\n[ssh] connection events\n[pty] terminal output\n[services] waiting for telemetry\n\nLogs window is managed by the NAGX window manager."; color: #9aa7b6; font-family: "Cascadia Mono"; font-size: 12px; x: 14px; y: 40px; }
+                TouchArea { x: parent.width - 16px; y: parent.height - 16px; width: 16px; height: 16px; mouse-cursor: "size-horizontal";
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down) {
+                            root.resizing-logs = true; root.resize-origin-width = root.logs-width; root.resize-origin-height = root.logs-height;
+                            root.drag-start-x = self.mouse-x; root.drag-start-y = self.mouse-y;
+                        } else if (event.kind == PointerEventKind.move && root.resizing-logs) {
+                            root.logs-width = root.clamp-int(root.resize-origin-width + self.mouse-x - root.drag-start-x, 360, 1200);
+                            root.logs-height = root.clamp-int(root.resize-origin-height + self.mouse-y - root.drag-start-y, 220, 700);
+                        } else if (event.kind == PointerEventKind.up) { root.resizing-logs = false; }
+                    }
                 }
             }
         }
 
-        Rectangle { height: 38px; background: #0a0f15; HorizontalBox { padding-left: 10px; padding-right: 10px; spacing: 8px; Button { text: "Terminal"; clicked => { root.terminal-minimized = false; } } Button { text: "Overview"; clicked => { root.overview-open = !root.overview-open; } } Button { text: "Monitoring"; clicked => { root.monitoring-open = !root.monitoring-open; } } Button { text: "Operations"; clicked => { root.operations-open = !root.operations-open; } } Rectangle { horizontal-stretch: 1; } Text { text: "NAGX / native client"; color: #4f5d6b; font-size: 10px; vertical-alignment: center; } } }
+        Rectangle { height: 38px; background: #0a0f15;
+            HorizontalBox { padding-left: 10px; padding-right: 10px; spacing: 8px;
+                Button { text: "Terminal"; clicked => { root.terminal-minimized = false; root.terminal-focused = true; root.logs-focused = false; } }
+                Button { text: "Logs"; clicked => { root.logs-open = true; root.logs-focused = true; root.terminal-focused = false; } }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: "NAGX / native client"; color: #4f5d6b; font-size: 10px; vertical-alignment: center; }
+            }
+        }
     }
 }
