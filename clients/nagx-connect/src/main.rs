@@ -1,4 +1,5 @@
 mod ssh;
+mod terminal_emulator;
 
 slint::include_modules!();
 
@@ -6,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use ssh::PtySession;
+use terminal_emulator::TerminalEmulator;
 
 fn terminal_key_bytes(text: &str, control: bool, alt: bool) -> Vec<u8> {
     use slint::platform::Key;
@@ -22,7 +24,7 @@ fn terminal_key_bytes(text: &str, control: bool, alt: bool) -> Vec<u8> {
     let home_key: slint::SharedString = Key::Home.into();
     let end_key: slint::SharedString = Key::End.into();
 
-    let mut data = if text == return_key {
+    let data = if text == return_key {
         vec![b'\r']
     } else if text == backspace_key {
         vec![0x7f]
@@ -49,8 +51,7 @@ fn terminal_key_bytes(text: &str, control: bool, alt: bool) -> Vec<u8> {
     };
 
     if control && data.len() == 1 && data[0].is_ascii_alphabetic() {
-        data[0] = data[0].to_ascii_lowercase() - b'a' + 1;
-        return data;
+        return vec![data[0].to_ascii_lowercase() - b'a' + 1];
     }
 
     if alt && !data.is_empty() {
@@ -65,12 +66,15 @@ fn terminal_key_bytes(text: &str, control: bool, alt: bool) -> Vec<u8> {
 fn main() -> Result<(), slint::PlatformError> {
     let window = MainWindow::new()?;
     let active_pty: Arc<Mutex<Option<PtySession>>> = Arc::new(Mutex::new(None));
+    let terminal = Arc::new(Mutex::new(TerminalEmulator::new(32, 120, 2000)));
 
     let weak_for_connect = window.as_weak();
     let pty_for_connect = Arc::clone(&active_pty);
+    let terminal_for_connect = Arc::clone(&terminal);
     window.on_connect(move |host, username, password| {
         let weak_window = weak_for_connect.clone();
         let pty_for_connect = Arc::clone(&pty_for_connect);
+        let terminal_for_connect = Arc::clone(&terminal_for_connect);
 
         if host.trim().is_empty() || username.trim().is_empty() {
             let _ = slint::invoke_from_event_loop(move || {
@@ -112,34 +116,36 @@ fn main() -> Result<(), slint::PlatformError> {
                 Ok((pty, mut output_rx)) => {
                     *pty_for_connect.lock().expect("PTY mutex poisoned") = Some(pty.clone());
 
+                    {
+                        let mut terminal = terminal_for_connect.lock().expect("terminal mutex poisoned");
+                        *terminal = TerminalEmulator::new(32, 120, 2000);
+                    }
+
                     let _ = slint::invoke_from_event_loop({
                         let weak_window = weak_window.clone();
                         move || {
                             if let Some(window) = weak_window.upgrade() {
-                                window.set_status_text("CONNECTED / PTY".into());
-                                window.set_terminal_text("NAGX PTY connected.\n".into());
+                                window.set_status_text("CONNECTED / VT100 PTY".into());
+                                window.set_terminal_text("NAGX terminal initializing...\n".into());
                                 window.invoke_focus_terminal();
                             }
                         }
                     });
 
                     runtime.block_on(async move {
-                        let mut terminal_text = String::new();
-
                         while let Some(bytes) = output_rx.recv().await {
-                            terminal_text.push_str(&String::from_utf8_lossy(&bytes));
+                            let rendered = {
+                                let mut terminal = terminal_for_connect
+                                    .lock()
+                                    .expect("terminal mutex poisoned");
+                                terminal.process(&bytes)
+                            };
 
-                            if terminal_text.len() > 64 * 1024 {
-                                let keep_from = terminal_text.len() - 48 * 1024;
-                                terminal_text.drain(..keep_from);
-                            }
-
-                            let text = terminal_text.clone();
                             let _ = slint::invoke_from_event_loop({
                                 let weak_window = weak_window.clone();
                                 move || {
                                     if let Some(window) = weak_window.upgrade() {
-                                        window.set_terminal_text(text.into());
+                                        window.set_terminal_text(rendered.into());
                                     }
                                 }
                             });
