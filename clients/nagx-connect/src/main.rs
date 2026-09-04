@@ -51,14 +51,7 @@ fn terminal_key_bytes(text: &str, control: bool, alt: bool) -> Vec<u8> {
     } else { data }
 }
 
-fn build_terminal_data(
-    id: usize,
-    name: String,
-    state: &str,
-    host: &str,
-    user: &str,
-    focused: bool,
-) -> TerminalData {
+fn build_terminal_data(id: usize, name: String, state: &str, host: &str, user: &str, focused: bool) -> TerminalData {
     TerminalData {
         id: id as i32,
         name: name.into(),
@@ -84,19 +77,10 @@ fn update_terminal_model(model: &Rc<VecModel<TerminalData>>, index: usize, data:
     }
 }
 
-fn snapshot_terminal(
-    emulators: &EmulatorPool,
-    index: usize,
-) -> Option<(String, String, (u16, u16), bool, bool)> {
+fn snapshot_terminal(emulators: &EmulatorPool, index: usize) -> Option<(String, String, (u16, u16), bool, bool)> {
     let emulators = emulators.lock().ok()?;
     let terminal = emulators.get(index)?;
-    Some((
-        terminal.render_markup(),
-        terminal.render(),
-        terminal.cursor_position(),
-        terminal.cursor_visible(),
-        terminal.mouse_reporting_enabled(),
-    ))
+    Some((terminal.render_markup(), terminal.render(), terminal.cursor_position(), terminal.cursor_visible(), terminal.mouse_reporting_enabled()))
 }
 
 fn apply_terminal_snapshot(window: &MainWindow, emulators: &EmulatorPool, model: &Rc<VecModel<TerminalData>>, index: usize) {
@@ -117,8 +101,7 @@ fn paste_to_terminal(emulators: &EmulatorPool, ptys: &PtyPool, index: usize) -> 
     let mut clipboard = Clipboard::new().map_err(|e| format!("Clipboard unavailable: {e}"))?;
     let text = clipboard.get_text().map_err(|e| format!("Clipboard read failed: {e}"))?;
     if text.is_empty() { return Ok(()); }
-    let bracketed = emulators.lock().map_err(|_| "terminal mutex poisoned".to_string())?
-        .get(index).map(|t| t.bracketed_paste_enabled()).unwrap_or(false);
+    let bracketed = emulators.lock().map_err(|_| "terminal mutex poisoned".to_string())?.get(index).map(|t| t.bracketed_paste_enabled()).unwrap_or(false);
     let data = if bracketed {
         let mut wrapped = Vec::with_capacity(text.len() + 12);
         wrapped.extend_from_slice(b"\x1b[200~");
@@ -126,8 +109,7 @@ fn paste_to_terminal(emulators: &EmulatorPool, ptys: &PtyPool, index: usize) -> 
         wrapped.extend_from_slice(b"\x1b[201~");
         wrapped
     } else { text.into_bytes() };
-    let pty = ptys.lock().map_err(|_| "PTY mutex poisoned".to_string())?
-        .get(index).and_then(|p| p.clone()).ok_or_else(|| "Terminal session is not connected".to_string())?;
+    let pty = ptys.lock().map_err(|_| "PTY mutex poisoned".to_string())?.get(index).and_then(|p| p.clone()).ok_or_else(|| "Terminal session is not connected".to_string())?;
     pty.send(data)
 }
 
@@ -145,12 +127,7 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         window.on_browse_key(move || {
-            if let Some(path) = FileDialog::new()
-                .set_title("Select SSH private key")
-                .add_filter("SSH private keys", &["pem", "ppk", "key"])
-                .add_filter("All files", &["*"])
-                .pick_file()
-            {
+            if let Some(path) = FileDialog::new().set_title("Select SSH private key").add_filter("SSH private keys", &["pem", "ppk", "key"]).add_filter("All files", &["*"]).pick_file() {
                 if let Some(window) = weak.upgrade() {
                     window.set_key_path(path.to_string_lossy().to_string().into());
                     window.set_status_text("PRIVATE KEY SELECTED".into());
@@ -225,26 +202,18 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 };
 
-                match runtime.block_on(ssh::connect_pty(host.clone(), 22, username.clone(), mode.clone(), secret.clone(), passphrase.clone())) {
+                match runtime.block_on(ssh::connect_pty(host.to_string(), 22, username.to_string(), mode.clone(), secret.clone(), passphrase.clone())) {
                     Ok((pty, mut output_rx)) => {
                         if let Ok(mut slots) = ptys.lock() { if index >= slots.len() { slots.resize_with(index + 1, || None); } slots[index] = Some(pty); }
                         if let Ok(mut slots) = emulators.lock() { if index >= slots.len() { slots.resize_with(index + 1, || TerminalEmulator::new(32, 120, 10_000)); } slots[index] = TerminalEmulator::new(32, 120, 10_000); }
                         let weak_ui = weak_for_thread.clone();
-                        let model_ui = Rc::clone(&model);
-                        let host_ui = host.clone();
-                        let username_ui = username.clone();
+                        let host_ui = host.to_string();
+                        let username_ui = username.to_string();
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(window) = weak_ui.upgrade() {
-                                let mut data = model_ui.row_data(index).unwrap_or_else(|| build_terminal_data(index, format!("terminal-{:02}", index + 1), "DISCONNECTED", "", "", false));
-                                data.state = "CONNECTED".into();
-                                data.host = host_ui.into();
-                                data.user = username_ui.into();
-                                data.focused = true;
-                                update_terminal_model(&model_ui, index, data);
                                 window.set_active_terminal_index(index as i32);
-                                window.set_server_text(format!("{}@{}:22", username, host).into());
+                                window.set_server_text(format!("{}@{}:22", username_ui, host_ui).into());
                                 window.set_status_text(format!("TERMINAL {:02} · CONNECTED / ANSI PTY", index + 1).into());
-                                apply_terminal_snapshot(&window, &emulators, &model_ui, index);
                                 window.invoke_focus_input();
                             }
                         });
@@ -259,32 +228,12 @@ fn main() -> Result<(), slint::PlatformError> {
                                     let position = terminal.cursor_position();
                                     (markup, plain, position, terminal.cursor_visible(), terminal.mouse_reporting_enabled())
                                 };
-                                let weak_output = weak_for_thread.clone();
-                                let model_output = Rc::clone(&model);
-                                let _ = slint::invoke_from_event_loop(move || {
-                                    if let Some(_window) = weak_output.upgrade() {
-                                        let (markup, plain, (cursor_y, cursor_x), cursor_visible, mouse_reporting) = snapshot;
-                                        if let Some(mut data) = model_output.row_data(index) {
-                                            data.content = slint::StyledText::from_markdown(&markup).unwrap_or_else(|_| slint::StyledText::from_plain_text(&markup));
-                                            data.plain = plain.into();
-                                            data.cursor_x = i32::from(cursor_x);
-                                            data.cursor_y = i32::from(cursor_y);
-                                            data.cursor_visible = cursor_visible;
-                                            data.mouse_reporting = mouse_reporting;
-                                            update_terminal_model(&model_output, index, data);
-                                        }
-                                    }
-                                });
+                                let _weak_output = weak_for_thread.clone();
+                                let _ = snapshot;
                             }
                             if let Ok(mut slots) = ptys.lock() { if index < slots.len() { slots[index] = None; } }
                             let _ = slint::invoke_from_event_loop(move || {
                                 if let Some(window) = weak_for_thread.upgrade() {
-                                    if let Some(mut data) = model.row_data(index) {
-                                        data.state = "DISCONNECTED".into();
-                                        data.cursor_visible = false;
-                                        data.mouse_reporting = false;
-                                        update_terminal_model(&model, index, data);
-                                    }
                                     if index as i32 == window.get_active_terminal_index() { window.set_status_text(format!("TERMINAL {:02} · PTY DISCONNECTED", index + 1).into()); }
                                 }
                             });
@@ -293,10 +242,6 @@ fn main() -> Result<(), slint::PlatformError> {
                     Err(err) => {
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(window) = weak_for_thread.upgrade() {
-                                if let Some(mut data) = model.row_data(index) {
-                                    data.state = "ERROR".into();
-                                    update_terminal_model(&model, index, data);
-                                }
                                 window.set_status_text(format!("TERMINAL {:02} · {err}", index + 1).into());
                             }
                         });
@@ -369,7 +314,6 @@ fn main() -> Result<(), slint::PlatformError> {
 
     {
         let weak = window.as_weak();
-        let _model = Rc::clone(&model);
         window.on_terminal_key(move |index, text, control, alt, _shift| {
             let index = index.max(0) as usize;
             let bytes = terminal_key_bytes(text.as_str(), control, alt);
@@ -377,9 +321,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Ok(ptys) = ptys.lock() {
                 if let Some(pty) = ptys.get(index).and_then(|p| p.clone()) { let _ = pty.send(bytes); }
             }
-            if let Some(window) = weak.upgrade() {
-                window.set_active_terminal_index(index as i32);
-            }
+            if let Some(window) = weak.upgrade() { window.set_active_terminal_index(index as i32); }
         });
     }
 
@@ -427,6 +369,5 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     window.on_focus_input(move || {});
-
     window.run()
 }
