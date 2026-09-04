@@ -264,8 +264,10 @@ fn main() -> Result<(), slint::PlatformError> {
 
                         runtime.block_on(async move {
                             while let Some(bytes) = output_rx.recv().await {
-                                let Some(snapshot) = snapshot_terminal(&emulators_thread, index) else { continue; };
                                 let mut emulator = emulators_thread.lock().expect("terminal mutex poisoned");
+                                if index >= emulator.len() {
+                                    continue;
+                                }
                                 let terminal = &mut emulator[index];
                                 let markup = terminal.process(&bytes);
                                 let plain = terminal.render();
@@ -363,11 +365,12 @@ fn main() -> Result<(), slint::PlatformError> {
 
     {
         let weak = window.as_weak();
+        let ptys_for_keyboard = Arc::clone(&ptys);
         window.on_terminal_key(move |index, text, control, alt, _shift| {
             let index = index.max(0) as usize;
             let bytes = terminal_key_bytes(text.as_str(), control, alt);
             if bytes.is_empty() { return; }
-            if let Ok(ptys) = ptys.lock() {
+            if let Ok(ptys) = ptys_for_keyboard.lock() {
                 if let Some(pty) = ptys.get(index).and_then(|p| p.clone()) { let _ = pty.send(bytes); }
             }
             if let Some(window) = weak.upgrade() { window.set_active_terminal_index(index as i32); }
