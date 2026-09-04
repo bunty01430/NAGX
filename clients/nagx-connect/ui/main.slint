@@ -8,50 +8,51 @@ export component MainWindow inherits Window {
     default-font-family: "Cascadia Mono";
     default-font-size: 13px;
 
-    property <string> status-text: "DISCONNECTED";
-    property <string> server-text: "No server connected";
-    property <int> active-workspace: 0;
-    property <int> active-terminal: 1;
-    property <int> auth-mode: 0;
-    property <string> key-path: "";
-    property <string> key-passphrase: "";
+    in-out property <string> status-text: "DISCONNECTED";
+    in-out property <string> server-text: "No server connected";
+    in-out property <int> active-workspace: 0;
+    in-out property <int> active-terminal: 1;
+    in-out property <int> auth-mode: 0;
+    in-out property <string> key-path: "";
+    in-out property <string> key-passphrase: "";
 
-    property <string> terminal-1-state: "OFFLINE";
-    property <string> terminal-2-state: "OFFLINE";
-    property <string> terminal-3-state: "OFFLINE";
-    property <string> terminal-1-plain: "NAGX terminal 1 offline.";
-    property <string> terminal-2-plain: "NAGX terminal 2 offline.";
-    property <string> terminal-3-plain: "NAGX terminal 3 offline.";
-    property <styled-text> terminal-1-styled: @markdown("NAGX terminal 1 offline.");
-    property <styled-text> terminal-2-styled: @markdown("NAGX terminal 2 offline.");
-    property <styled-text> terminal-3-styled: @markdown("NAGX terminal 3 offline.");
-    property <int> terminal-1-cursor-x: 0;
-    property <int> terminal-1-cursor-y: 0;
-    property <bool> terminal-1-cursor-visible: false;
-    property <bool> terminal-1-mouse-reporting: false;
-    property <int> terminal-2-cursor-x: 0;
-    property <int> terminal-2-cursor-y: 0;
-    property <bool> terminal-2-cursor-visible: false;
-    property <bool> terminal-2-mouse-reporting: false;
-    property <int> terminal-3-cursor-x: 0;
-    property <int> terminal-3-cursor-y: 0;
-    property <bool> terminal-3-cursor-visible: false;
-    property <bool> terminal-3-mouse-reporting: false;
+    in-out property <string> terminal-1-state: "OFFLINE";
+    in-out property <string> terminal-2-state: "OFFLINE";
+    in-out property <string> terminal-3-state: "OFFLINE";
+    in-out property <string> terminal-1-plain: "NAGX terminal 1 offline.";
+    in-out property <string> terminal-2-plain: "NAGX terminal 2 offline.";
+    in-out property <string> terminal-3-plain: "NAGX terminal 3 offline.";
+    in-out property <styled-text> terminal-1-styled: @markdown("NAGX terminal 1 offline.");
+    in-out property <styled-text> terminal-2-styled: @markdown("NAGX terminal 2 offline.");
+    in-out property <styled-text> terminal-3-styled: @markdown("NAGX terminal 3 offline.");
+    in-out property <int> terminal-1-cursor-x: 0;
+    in-out property <int> terminal-1-cursor-y: 0;
+    in-out property <bool> terminal-1-cursor-visible: false;
+    in-out property <bool> terminal-1-mouse-reporting: false;
+    in-out property <int> terminal-2-cursor-x: 0;
+    in-out property <int> terminal-2-cursor-y: 0;
+    in-out property <bool> terminal-2-cursor-visible: false;
+    in-out property <bool> terminal-2-mouse-reporting: false;
+    in-out property <int> terminal-3-cursor-x: 0;
+    in-out property <int> terminal-3-cursor-y: 0;
+    in-out property <bool> terminal-3-cursor-visible: false;
+    in-out property <bool> terminal-3-mouse-reporting: false;
 
-    property <int> terminal-x: 292;
-    property <int> terminal-y: 220;
-    property <int> terminal-width: 860;
-    property <int> terminal-height: 520;
-    property <bool> terminal-minimized: false;
-    property <bool> terminal-maximized: false;
-    property <bool> terminal-focused: true;
+    in-out property <int> terminal-x: 292;
+    in-out property <int> terminal-y: 220;
+    in-out property <int> terminal-width: 860;
+    in-out property <int> terminal-height: 520;
+    in-out property <bool> terminal-minimized: false;
+    in-out property <bool> terminal-maximized: false;
+    in-out property <bool> terminal-focused: true;
 
-    property <int> logs-x: 560;
-    property <int> logs-y: 170;
-    property <int> logs-width: 620;
-    property <int> logs-height: 360;
-    property <bool> logs-open: false;
-    property <bool> logs-focused: false;
+    in-out property <int> logs-x: 560;
+    in-out property <int> logs-y: 170;
+    in-out property <int> logs-width: 620;
+    in-out property <int> logs-height: 360;
+    in-out property <bool> logs-open: false;
+    in-out property <bool> logs-focused: false;
+    private property <bool> focus-terminal-request: false;
     property <int> drag-start-x: 0;
     property <int> drag-start-y: 0;
     property <int> drag-origin-x: 0;
@@ -72,11 +73,11 @@ export component MainWindow inherits Window {
     callback terminal-wheel(int, int);
     callback terminal-paste(int);
 
-    function focus-terminal() { }
-    function focus-terminal-window() { root.terminal-focused = true; root.logs-focused = false; root.terminal-minimized = false; root.select-terminal(root.active-terminal); }
-    function focus-logs-window() { root.logs-focused = true; root.terminal-focused = false; }
-    function select-terminal-ui(slot: int) { root.active-terminal = root.clamp-slot(slot); root.terminal-minimized = false; root.terminal-focused = true; root.logs-focused = false; root.select-terminal(root.active-terminal); }
-    function clamp-slot(slot: int) -> int { return min(max(slot, 1), 3); }
+    public function focus-terminal() { root.focus-terminal-request = !root.focus-terminal-request; }
+    public function focus-terminal-window() { root.terminal-focused = true; root.logs-focused = false; root.terminal-minimized = false; root.select-terminal(root.active-terminal); root.focus-terminal(); }
+    public function focus-logs-window() { root.logs-focused = true; root.terminal-focused = false; }
+    public function select-terminal-ui(slot: int) { root.active-terminal = root.clamp-slot(slot); root.terminal-minimized = false; root.terminal-focused = true; root.logs-focused = false; root.select-terminal(root.active-terminal); root.focus-terminal(); }
+    public pure function clamp-slot(slot: int) -> int { return min(max(slot, 1), 3); }
 
     VerticalBox {
         spacing: 0px;
@@ -90,7 +91,6 @@ export component MainWindow inherits Window {
                 Text { text: root.status-text; color: #64ffda; font-size: 11px; }
             }
         }
-
         Rectangle { height: 38px; background: #0a0f15;
             HorizontalBox { padding-left: 12px; spacing: 6px;
                 Button { text: "Overview"; clicked => { root.active-workspace = 0; } }
@@ -101,7 +101,6 @@ export component MainWindow inherits Window {
                 Text { text: "Alt+1..4 workspaces | Alt+Tab terminals"; color: #5b6978; font-size: 10px; vertical-alignment: center; }
             }
         }
-
         Rectangle { vertical-stretch: 1; background: #06090d;
             Rectangle { x: 12px; y: 12px; width: 250px; height: parent.height - 24px; background: #090d13;
                 VerticalBox { padding: 14px; spacing: 8px;
@@ -119,7 +118,7 @@ export component MainWindow inherits Window {
                                 LineEdit { text: root.key-path; placeholder-text: "private key"; read-only: true; horizontal-stretch: 1; }
                                 Button { text: "BROWSE"; clicked => { root.browse-key(); } }
                             }
-                            LineEdit { placeholder-text: "key passphrase"; input-type: password; edited(text) => { root.key-passphrase = text; } }
+                            LineEdit { text: root.key-passphrase; placeholder-text: "key passphrase"; input-type: password; edited(text) => { root.key-passphrase = text; } }
                         }
                     }
                     Button { text: "CONNECT T" + root.active-terminal; clicked => { root.connect-slot(root.active-terminal, host-input.text, user-input.text, root.auth-mode == 0 ? password-input.text : "NAGXKEY:" + root.key-path + "\n" + root.key-passphrase); } }
@@ -164,7 +163,7 @@ export component MainWindow inherits Window {
                 Rectangle { x: 0px; y: 28px; width: parent.width; height: parent.height - 28px; background: #020407; clip: true;
                     Rectangle { x: 10px; y: 8px; width: parent.width - 20px; height: parent.height - 16px; clip: true;
                         StyledText { width: parent.width; height: parent.height; text: root.active-terminal == 1 ? root.terminal-1-styled : root.active-terminal == 2 ? root.terminal-2-styled : root.terminal-3-styled; }
-                        terminal-input := TextEdit { width: parent.width; height: parent.height; text: root.active-terminal == 1 ? root.terminal-1-plain : root.active-terminal == 2 ? root.terminal-2-plain : root.terminal-3-plain; read-only: true; wrap: no-wrap; opacity: 0%; key-pressed(event) => {
+                        terminal-input := TextEdit { width: parent.width; height: parent.height; text: root.active-terminal == 1 ? root.terminal-1-plain : root.active-terminal == 2 ? root.terminal-2-plain : root.terminal-3-plain; read-only: true; wrap: no-wrap; opacity: 0%; changed root.focus-terminal-request => { self.focus(); } key-pressed(event) => {
                             if event.modifiers.alt {
                                 if event.text == "1" { root.select-terminal-ui(1); accept; }
                                 if event.text == "2" { root.select-terminal-ui(2); accept; }
@@ -209,7 +208,6 @@ export component MainWindow inherits Window {
                 }
             }
         }
-
         Rectangle { height: 38px; background: #0a0f15;
             HorizontalBox { padding-left: 10px; spacing: 8px;
                 Button { text: "T1"; clicked => { root.select-terminal-ui(1); } }
