@@ -31,27 +31,27 @@ fn terminal_key_bytes(text: &str, control: bool, alt: bool) -> Vec<u8> {
     let home_key: slint::SharedString = Key::Home.into();
     let end_key: slint::SharedString = Key::End.into();
 
-    let data = if text == return_key {
+    let data = if return_key == text {
         vec![b'\r']
-    } else if text == backspace_key {
+    } else if backspace_key == text {
         vec![0x7f]
-    } else if text == tab_key {
+    } else if tab_key == text {
         vec![b'\t']
-    } else if text == escape_key {
+    } else if escape_key == text {
         vec![0x1b]
-    } else if text == up_key {
+    } else if up_key == text {
         b"\x1b[A".to_vec()
-    } else if text == down_key {
+    } else if down_key == text {
         b"\x1b[B".to_vec()
-    } else if text == right_key {
+    } else if right_key == text {
         b"\x1b[C".to_vec()
-    } else if text == left_key {
+    } else if left_key == text {
         b"\x1b[D".to_vec()
-    } else if text == delete_key {
+    } else if delete_key == text {
         b"\x1b[3~".to_vec()
-    } else if text == home_key {
+    } else if home_key == text {
         b"\x1b[H".to_vec()
-    } else if text == end_key {
+    } else if end_key == text {
         b"\x1b[F".to_vec()
     } else {
         text.as_bytes().to_vec()
@@ -117,10 +117,6 @@ fn apply_active_terminal_snapshot(window: &MainWindow, terminals: &TerminalSlots
         }
         _ => return,
     }
-    window.set_cursor_x(i32::from(cursor_x));
-    window.set_cursor_y(i32::from(cursor_y));
-    window.set_cursor_visible(cursor_visible);
-    window.set_mouse_reporting(mouse_reporting);
 }
 
 fn paste_from_clipboard(terminals: &TerminalSlots, ptys: &PtySlots, slot: usize) -> Result<(), String> {
@@ -241,12 +237,6 @@ fn spawn_terminal_connection(
                                         }
                                         _ => {}
                                     }
-                                    if slot == (window.get_active_terminal() as usize).saturating_sub(1) {
-                                        window.set_cursor_x(i32::from(cursor_x));
-                                        window.set_cursor_y(i32::from(cursor_y));
-                                        window.set_cursor_visible(cursor_visible);
-                                        window.set_mouse_reporting(mouse_reporting);
-                                    }
                                 }
                             }
                         });
@@ -264,8 +254,6 @@ fn spawn_terminal_connection(
                             }
                             if slot == (window.get_active_terminal() as usize).saturating_sub(1) {
                                 window.set_status_text(format!("T{} PTY DISCONNECTED", slot + 1).into());
-                                window.set_cursor_visible(false);
-                                window.set_mouse_reporting(false);
                             }
                         }
                     });
