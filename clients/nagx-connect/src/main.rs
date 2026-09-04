@@ -125,8 +125,9 @@ fn main() -> Result<(), slint::PlatformError> {
                         let weak_window = weak_window.clone();
                         move || {
                             if let Some(window) = weak_window.upgrade() {
-                                window.set_status_text("CONNECTED / VT100 PTY".into());
-                                window.set_terminal_text("NAGX terminal initializing...\n".into());
+                                window.set_status_text("CONNECTED / ANSI PTY".into());
+                                window.set_terminal_styled(slint::StyledText::from_plain_text("NAGX terminal initializing..."));
+                                window.set_cursor_visible(false);
                                 window.invoke_focus_terminal();
                             }
                         }
@@ -134,18 +135,25 @@ fn main() -> Result<(), slint::PlatformError> {
 
                     runtime.block_on(async move {
                         while let Some(bytes) = output_rx.recv().await {
-                            let rendered = {
+                            let (markup, (cursor_y, cursor_x), cursor_visible) = {
                                 let mut terminal = terminal_for_connect
                                     .lock()
                                     .expect("terminal mutex poisoned");
-                                terminal.process(&bytes)
+                                let markup = terminal.process(&bytes);
+                                let position = terminal.cursor_position();
+                                (markup, position, terminal.cursor_visible())
                             };
 
                             let _ = slint::invoke_from_event_loop({
                                 let weak_window = weak_window.clone();
                                 move || {
                                     if let Some(window) = weak_window.upgrade() {
-                                        window.set_terminal_text(rendered.into());
+                                        let styled = slint::StyledText::from_markdown(&markup)
+                                            .unwrap_or_else(|_| slint::StyledText::from_plain_text(&markup));
+                                        window.set_terminal_styled(styled);
+                                        window.set_cursor_x(i32::from(cursor_x));
+                                        window.set_cursor_y(i32::from(cursor_y));
+                                        window.set_cursor_visible(cursor_visible);
                                     }
                                 }
                             });
@@ -154,6 +162,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(window) = weak_window.upgrade() {
                                 window.set_status_text("PTY DISCONNECTED".into());
+                                window.set_cursor_visible(false);
                             }
                         });
                     });
