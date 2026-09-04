@@ -14,10 +14,15 @@ export component MainWindow inherits Window {
     property <int> cursor-x: 0;
     property <int> cursor-y: 0;
     property <bool> cursor-visible: false;
+    property <bool> mouse-reporting: false;
 
     callback connect(string, string, string);
     callback terminal-key(string, bool, bool);
+    callback terminal-resize(int, int, int, int);
+    callback terminal-mouse(int, int, int, int, bool, bool, bool);
+    callback terminal-wheel(int);
     function focus-terminal() { terminal-input.focus(); }
+    pure function length-to-int(value: length) -> int { return value / 1px; }
 
     VerticalBox {
         spacing: 0px;
@@ -37,15 +42,12 @@ export component MainWindow inherits Window {
                     font-size: 24px;
                     font-weight: 700;
                 }
-
                 Text {
                     text: "CONNECT";
                     color: #718096;
                     font-size: 12px;
                 }
-
                 Rectangle { horizontal-stretch: 1; }
-
                 Text {
                     text: root.status-text;
                     color: #64ffda;
@@ -64,46 +66,17 @@ export component MainWindow inherits Window {
                 VerticalBox {
                     padding: 18px;
                     spacing: 12px;
-
-                    Text {
-                        text: "CONNECTION";
-                        color: #718096;
-                        font-size: 11px;
-                    }
-
-                    LineEdit {
-                        id: host-input;
-                        placeholder-text: "host or IP";
-                    }
-
-                    LineEdit {
-                        id: user-input;
-                        placeholder-text: "username";
-                    }
-
-                    LineEdit {
-                        id: password-input;
-                        placeholder-text: "password";
-                        input-type: password;
-                    }
-
+                    Text { text: "CONNECTION"; color: #718096; font-size: 11px; }
+                    LineEdit { id: host-input; placeholder-text: "host or IP"; }
+                    LineEdit { id: user-input; placeholder-text: "username"; }
+                    LineEdit { id: password-input; placeholder-text: "password"; input-type: password; }
                     Button {
                         text: "CONNECT";
                         clicked => { root.connect(host-input.text, user-input.text, password-input.text); }
                     }
-
                     Rectangle { vertical-stretch: 1; }
-
-                    Text {
-                        text: "SESSION";
-                        color: #718096;
-                        font-size: 11px;
-                    }
-                    Text {
-                        text: root.server-text;
-                        color: #d7dee8;
-                        font-size: 13px;
-                    }
+                    Text { text: "SESSION"; color: #718096; font-size: 11px; }
+                    Text { text: root.server-text; color: #d7dee8; font-size: 13px; }
                 }
             }
 
@@ -118,21 +91,9 @@ export component MainWindow inherits Window {
                     HorizontalBox {
                         height: 26px;
                         spacing: 12px;
-
-                        Text {
-                            text: "NAGX TERMINAL";
-                            color: #d7dee8;
-                            font-size: 16px;
-                            font-weight: 700;
-                        }
-
+                        Text { text: "NAGX TERMINAL"; color: #d7dee8; font-size: 16px; font-weight: 700; }
                         Rectangle { horizontal-stretch: 1; }
-
-                        Text {
-                            text: "VT100 / ANSI / 120×32";
-                            color: #718096;
-                            font-size: 11px;
-                        }
+                        Text { text: "VT100 / ANSI / AUTO-SIZE"; color: #718096; font-size: 11px; }
                     }
 
                     Rectangle {
@@ -141,39 +102,95 @@ export component MainWindow inherits Window {
                         border-width: 1px;
                         border-color: #18212c;
 
-                        StyledText {
+                        changed width => {
+                            root.terminal-resize(
+                                max(1, root.length-to-int((terminal-frame.width - 20px) / 8.45px)),
+                                max(1, root.length-to-int((terminal-frame.height - 16px) / 17px)),
+                                root.length-to-int(terminal-frame.width),
+                                root.length-to-int(terminal-frame.height)
+                            );
+                        }
+                        changed height => {
+                            root.terminal-resize(
+                                max(1, root.length-to-int((terminal-frame.width - 20px) / 8.45px)),
+                                max(1, root.length-to-int((terminal-frame.height - 16px) / 17px)),
+                                root.length-to-int(terminal-frame.width),
+                                root.length-to-int(terminal-frame.height)
+                            );
+                        }
+
+                        terminal-frame := Rectangle {
                             x: 10px;
                             y: 8px;
                             width: parent.width - 20px;
                             height: parent.height - 16px;
-                            text: root.terminal-styled;
-                            font-family: "Cascadia Mono";
-                            font-size: 14px;
-                        }
+                            clip: true;
 
-                        terminal-input := TextEdit {
-                            width: parent.width;
-                            height: parent.height;
-                            text: "";
-                            read-only: false;
-                            color: transparent;
-                            selection-foreground-color: transparent;
-                            selection-background-color: transparent;
-                            background: transparent;
-                            cursor-width: 0px;
-                            key-pressed(event) => {
-                                root.terminal-key(event.text, event.modifiers.control, event.modifiers.alt);
-                                accept
+                            StyledText {
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width;
+                                height: parent.height;
+                                text: root.terminal-styled;
+                                font-family: "Cascadia Mono";
+                                font-size: 14px;
                             }
-                        }
 
-                        Rectangle {
-                            visible: root.cursor-visible;
-                            x: 10px + root.cursor-x * 8.45px;
-                            y: 8px + root.cursor-y * 17.0px;
-                            width: 2px;
-                            height: 16px;
-                            background: #64ffda;
+                            terminal-input := TextEdit {
+                                width: parent.width;
+                                height: parent.height;
+                                text: "";
+                                read-only: false;
+                                color: transparent;
+                                selection-foreground-color: #d7dee8;
+                                selection-background-color: #233142;
+                                background: transparent;
+                                cursor-width: 0px;
+                                key-pressed(event) => {
+                                    root.terminal-key(event.text, event.modifiers.control, event.modifiers.alt);
+                                    accept
+                                }
+                            }
+
+                            mouse-capture := TouchArea {
+                                visible: root.mouse-reporting;
+                                enabled: root.mouse-reporting;
+                                mouse-cursor: root.mouse-reporting ? "default" : "text";
+
+                                pointer-event(event) => {
+                                    let button = event.button == PointerEventButton.left ? 1
+                                        : event.button == PointerEventButton.middle ? 2
+                                        : event.button == PointerEventButton.right ? 3
+                                        : 0;
+                                    let kind = event.kind == PointerEventKind.down ? 1
+                                        : event.kind == PointerEventKind.up ? 2
+                                        : event.kind == PointerEventKind.move ? 3
+                                        : 0;
+                                    root.terminal-mouse(
+                                        button,
+                                        kind,
+                                        root.length-to-int(self.mouse-x / 8.45px) + 1,
+                                        root.length-to-int(self.mouse-y / 17px) + 1,
+                                        event.modifiers.shift,
+                                        event.modifiers.alt,
+                                        event.modifiers.control
+                                    );
+                                }
+
+                                scroll-event(event) => {
+                                    root.terminal-wheel(root.length-to-int(event.delta-y));
+                                    accept
+                                }
+                            }
+
+                            Rectangle {
+                                visible: root.cursor-visible;
+                                x: root.cursor-x * 8.45px;
+                                y: root.cursor-y * 17px;
+                                width: 2px;
+                                height: 16px;
+                                background: #64ffda;
+                            }
                         }
                     }
                 }
