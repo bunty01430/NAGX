@@ -1,4 +1,4 @@
-import { VerticalBox, HorizontalBox, Button, LineEdit, FocusScope } from "std-widgets.slint";
+import { VerticalBox, HorizontalBox, Button, LineEdit, TextEdit } from "std-widgets.slint";
 
 export struct TerminalData {
     id: int,
@@ -148,10 +148,15 @@ export component MainWindow inherits Window {
     callback terminal-mouse(int, int, int, int, int, bool, bool, bool);
     callback focus-input();
 
-    terminal-input := FocusScope {
+    terminal_input := TextEdit {
+        x: 0px;
+        y: 0px;
         width: 1px;
         height: 1px;
+        opacity: 0%;
         enabled: true;
+        read-only: true;
+        wrap: no-wrap;
         key-pressed(event) => {
             if root.command-open {
                 return reject;
@@ -168,8 +173,8 @@ export component MainWindow inherits Window {
             return accept;
         }
     }
-    forward-focus: terminal-input;
-    focus-input() => { terminal-input.focus(); }
+    forward-focus: terminal_input;
+    focus-input() => { terminal_input.focus(); }
 
     function workspace-title(index: int) -> string { return index == 0 ? "Overview" : index == 1 ? "Development" : index == 2 ? "Monitoring" : "Operations"; }
     function terminal-columns(count: int) -> int { return count <= 1 ? 1 : count == 2 ? 2 : count <= 4 ? 2 : count <= 9 ? 3 : 4; }
@@ -251,10 +256,10 @@ export component MainWindow inherits Window {
                     y: floor(index / root.terminal-columns(root.terminals.length)) * (parent.height / root.terminal-rows(root.terminals.length));
                     width: parent.width / root.terminal-columns(root.terminals.length);
                     height: parent.height / root.terminal-rows(root.terminals.length);
-                    focus-request(index) => { root.focus-terminal(index); root.terminal-input.focus(); }
+                    focus-request(index) => { root.focus-terminal(index); root.focus-input(); }
                     close(index) => { root.close-terminal(index); }
                     maximize(index) => { root.maximize-terminal(index); }
-                    split(index) => { root.split-terminal(index); root.terminal-input.focus(); }
+                    split(index) => { root.split-terminal(index); root.focus-input(); }
                     terminal-key(index, text, control, alt, shift) => { root.terminal-key(index, text, control, alt, shift); }
                     terminal-paste(index) => { root.terminal-paste(index); }
                     terminal-mouse(index, button, kind, x, y, shift, alt, control) => { root.terminal-mouse(index, button, kind, x, y, shift, alt, control); }
